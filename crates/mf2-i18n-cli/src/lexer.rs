@@ -11,10 +11,14 @@ pub enum TokenKind {
     Text(String),
     LBrace,
     RBrace,
+    Arrow,
     Dollar,
     Colon,
     Equals,
     Comma,
+    LBracket,
+    RBracket,
+    Star,
     Ident(String),
     Number(String),
 }
@@ -37,8 +41,13 @@ pub struct Lexer<'a> {
     offset: usize,
     line: u32,
     column: u32,
-    in_expr: bool,
-    expr_depth: u32,
+    mode_stack: Vec<Mode>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Text,
+    Expr,
 }
 
 impl<'a> Lexer<'a> {
@@ -49,21 +58,20 @@ impl<'a> Lexer<'a> {
             offset: 0,
             line: 1,
             column: 1,
-            in_expr: false,
-            expr_depth: 0,
+            mode_stack: vec![Mode::Text],
         }
     }
 
     pub fn lex_all(mut self) -> Result<Vec<Token>, LexError> {
         let mut tokens = Vec::new();
         while self.offset < self.bytes.len() {
-            if self.in_expr {
+            if self.is_expr_mode() {
                 self.lex_expr_token(&mut tokens)?;
             } else {
                 self.lex_text_token(&mut tokens)?;
             }
         }
-        if self.expr_depth > 0 {
+        if self.mode_stack.len() > 1 {
             let span = Span {
                 start: self.offset,
                 end: self.offset,
@@ -81,28 +89,8 @@ impl<'a> Lexer<'a> {
         let column = self.column;
         while self.offset < self.bytes.len() {
             let byte = self.bytes[self.offset];
-            if byte == b'{' {
-                if self.offset > start {
-                    let text = &self.input[start..self.offset];
-                    tokens.push(Token {
-                        kind: TokenKind::Text(text.to_string()),
-                        span: Span {
-                            start,
-                            end: self.offset,
-                            line,
-                            column,
-                        },
-                    });
-                }
-                let span = self.single_span(self.offset, line, column);
-                tokens.push(Token {
-                    kind: TokenKind::LBrace,
-                    span,
-                });
-                self.advance_byte();
-                self.in_expr = true;
-                self.expr_depth = 1;
-                return Ok(());
+            if byte == b'{' || byte == b'}' {
+                break;
             }
             self.advance_byte();
         }
@@ -118,6 +106,35 @@ impl<'a> Lexer<'a> {
                 },
             });
         }
+        if self.offset >= self.bytes.len() {
+            return Ok(());
+        }
+        let byte = self.bytes[self.offset];
+        let line = self.line;
+        let column = self.column;
+        let span = self.single_span(self.offset, line, column);
+        match byte {
+            b'{' => {
+                tokens.push(Token {
+                    kind: TokenKind::LBrace,
+                    span,
+                });
+                self.advance_byte();
+                self.mode_stack.push(Mode::Expr);
+            }
+            b'}' => {
+                if self.mode_stack.len() <= 1 {
+                    return Err(self.error("unbalanced brace", span));
+                }
+                tokens.push(Token {
+                    kind: TokenKind::RBrace,
+                    span,
+                });
+                self.advance_byte();
+                self.mode_stack.pop();
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -132,18 +149,12 @@ impl<'a> Lexer<'a> {
         let span = self.single_span(self.offset, line, column);
         match byte {
             b'}' => {
-                if self.expr_depth == 0 {
-                    return Err(self.error("unbalanced brace", span));
-                }
                 tokens.push(Token {
                     kind: TokenKind::RBrace,
                     span,
                 });
                 self.advance_byte();
-                self.expr_depth -= 1;
-                if self.expr_depth == 0 {
-                    self.in_expr = false;
-                }
+                self.mode_stack.pop();
             }
             b'{' => {
                 tokens.push(Token {
@@ -151,7 +162,21 @@ impl<'a> Lexer<'a> {
                     span,
                 });
                 self.advance_byte();
-                self.expr_depth += 1;
+                self.mode_stack.push(Mode::Text);
+            }
+            b'[' => {
+                tokens.push(Token {
+                    kind: TokenKind::LBracket,
+                    span,
+                });
+                self.advance_byte();
+            }
+            b']' => {
+                tokens.push(Token {
+                    kind: TokenKind::RBracket,
+                    span,
+                });
+                self.advance_byte();
             }
             b'$' => {
                 tokens.push(Token {
@@ -163,6 +188,13 @@ impl<'a> Lexer<'a> {
             b':' => {
                 tokens.push(Token {
                     kind: TokenKind::Colon,
+                    span,
+                });
+                self.advance_byte();
+            }
+            b'*' => {
+                tokens.push(Token {
+                    kind: TokenKind::Star,
                     span,
                 });
                 self.advance_byte();
@@ -181,7 +213,26 @@ impl<'a> Lexer<'a> {
                 });
                 self.advance_byte();
             }
-            b'-' | b'0'..=b'9' => {
+            b'-' => {
+                if self.peek_byte() == Some(b'>') {
+                    let arrow_span = Span {
+                        start: self.offset,
+                        end: self.offset + 2,
+                        line,
+                        column,
+                    };
+                    tokens.push(Token {
+                        kind: TokenKind::Arrow,
+                        span: arrow_span,
+                    });
+                    self.advance_byte();
+                    self.advance_byte();
+                } else {
+                    let token = self.lex_number()?;
+                    tokens.push(token);
+                }
+            }
+            b'0'..=b'9' => {
                 let token = self.lex_number()?;
                 tokens.push(token);
             }
@@ -287,6 +338,14 @@ impl<'a> Lexer<'a> {
         } else {
             self.column += 1;
         }
+    }
+
+    fn peek_byte(&self) -> Option<u8> {
+        self.bytes.get(self.offset + 1).copied()
+    }
+
+    fn is_expr_mode(&self) -> bool {
+        matches!(self.mode_stack.last(), Some(Mode::Expr))
     }
 
     fn single_span(&self, start: usize, line: u32, column: u32) -> Span {
