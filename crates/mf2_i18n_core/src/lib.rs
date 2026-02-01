@@ -7,8 +7,10 @@ extern crate std;
 
 mod error;
 mod language_tag;
+mod negotiation;
 mod types;
 
 pub use error::{CoreError, CoreResult};
 pub use language_tag::LanguageTag;
+pub use negotiation::{negotiate_lookup, negotiate_lookup_with_trace, NegotiationResult, NegotiationTrace};
 pub use types::{Key, MessageId};
