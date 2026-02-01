@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod config;
+mod catalog;
 mod diagnostic;
 mod error;
 mod model;
