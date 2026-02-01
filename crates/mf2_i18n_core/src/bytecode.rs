@@ -87,6 +87,7 @@ pub struct BytecodeProgram {
     pub string_pool: StringPool,
     pub number_pool: Vec<f64>,
     pub case_tables: Vec<CaseTable>,
+    pub arg_names: Vec<String>,
 }
 
 impl BytecodeProgram {
@@ -96,12 +97,23 @@ impl BytecodeProgram {
             string_pool: StringPool::new(),
             number_pool: Vec::new(),
             case_tables: Vec::new(),
+            arg_names: Vec::new(),
         }
     }
 
     pub fn push_opcode(&mut self, opcode: Opcode) -> usize {
         self.opcodes.push(opcode);
         self.opcodes.len() - 1
+    }
+
+    pub fn push_arg_name(&mut self, name: impl Into<String>) -> ArgIndex {
+        let idx = self.arg_names.len();
+        self.arg_names.push(name.into());
+        idx as ArgIndex
+    }
+
+    pub fn arg_name(&self, index: ArgIndex) -> Option<&str> {
+        self.arg_names.get(index as usize).map(String::as_str)
     }
 }
 
