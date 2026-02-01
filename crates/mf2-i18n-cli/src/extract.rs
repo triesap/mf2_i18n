@@ -1,5 +1,6 @@
 use crate::lexer::Span;
 use crate::model::{ArgSpec, ArgType};
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct ExtractedMessage {
@@ -8,7 +9,8 @@ pub struct ExtractedMessage {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
+#[error("{message}")]
 pub struct ExtractError {
     pub message: String,
     pub span: Span,
