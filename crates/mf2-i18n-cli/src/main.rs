@@ -3,6 +3,7 @@
 mod config;
 mod diagnostic;
 mod error;
+mod id_map;
 mod lexer;
 mod parser;
 mod validator;
