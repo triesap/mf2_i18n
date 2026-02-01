@@ -2,8 +2,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::{
-    format_value, Args, BytecodeProgram, CoreError, CoreResult, FormatBackend, FormatterId, Opcode,
-    Value,
+    format_value, Args, BytecodeProgram, CaseKey, CaseTable, CoreError, CoreResult, FormatBackend,
+    FormatterId, Opcode, PluralRuleset, Value,
 };
 
 pub fn execute(
@@ -16,7 +16,8 @@ pub fn execute(
     let mut pc: usize = 0;
 
     while pc < program.opcodes.len() {
-        match program.opcodes[pc] {
+        let opcode = program.opcodes[pc];
+        match opcode {
             Opcode::EmitText { sidx } => {
                 let text = program
                     .string_pool
@@ -65,8 +66,27 @@ pub fn execute(
                 let rendered = format_value(backend, fid, &value, &[])?;
                 stack.push(Value::Str(rendered));
             }
-            Opcode::Select { .. } | Opcode::SelectPlural { .. } | Opcode::Jump { .. } => {
-                return Err(CoreError::Unsupported("control flow not supported"));
+            Opcode::Select { aidx, table } => {
+                let target = select_case(program, args, aidx, table)?;
+                pc = target;
+                continue;
+            }
+            Opcode::SelectPlural {
+                aidx,
+                ruleset,
+                table,
+            } => {
+                let target = select_plural_case(program, args, backend, aidx, ruleset, table)?;
+                pc = target;
+                continue;
+            }
+            Opcode::Jump { rel } => {
+                let next = pc as i32 + rel;
+                if next < 0 {
+                    return Err(CoreError::InvalidInput("jump underflow"));
+                }
+                pc = next as usize;
+                continue;
             }
             Opcode::End => break,
         }
@@ -74,6 +94,121 @@ pub fn execute(
     }
 
     Ok(output)
+}
+
+fn select_case(
+    program: &BytecodeProgram,
+    args: &Args,
+    aidx: u32,
+    table_idx: u32,
+) -> CoreResult<usize> {
+    let name = program
+        .arg_name(aidx)
+        .ok_or(CoreError::InvalidInput("arg index out of bounds"))?;
+    let value = args.require(name)?;
+    let value = match value {
+        Value::Str(text) => text,
+        _ => return Err(CoreError::InvalidInput("select expects string")),
+    };
+    let table = get_case_table(program, table_idx)?;
+    match_case(table, program, value)
+}
+
+fn select_plural_case(
+    program: &BytecodeProgram,
+    args: &Args,
+    backend: &dyn FormatBackend,
+    aidx: u32,
+    ruleset: PluralRuleset,
+    table_idx: u32,
+) -> CoreResult<usize> {
+    let name = program
+        .arg_name(aidx)
+        .ok_or(CoreError::InvalidInput("arg index out of bounds"))?;
+    let value = args.require(name)?;
+    let number = match value {
+        Value::Num(value) => *value,
+        _ => return Err(CoreError::InvalidInput("plural expects number")),
+    };
+    let table = get_case_table(program, table_idx)?;
+    if let Some(target) = match_exact_number(table, number) {
+        return Ok(target);
+    }
+    if matches!(ruleset, PluralRuleset::Cardinal) {
+        let category = backend.plural_category(number)?;
+        if let Some(target) = match_plural_category(table, category) {
+            return Ok(target);
+        }
+    }
+    match_other(table)
+}
+
+fn get_case_table<'a>(
+    program: &'a BytecodeProgram,
+    table_idx: u32,
+) -> CoreResult<&'a CaseTable> {
+    program
+        .case_tables
+        .get(table_idx as usize)
+        .ok_or(CoreError::InvalidInput("case table index out of bounds"))
+}
+
+fn match_case(table: &CaseTable, program: &BytecodeProgram, value: &str) -> CoreResult<usize> {
+    let mut other = None;
+    for entry in &table.entries {
+        match &entry.key {
+            CaseKey::String(sidx) => {
+                if let Some(candidate) = program.string_pool.get(*sidx) {
+                    if candidate == value {
+                        return Ok(entry.target as usize);
+                    }
+                }
+            }
+            CaseKey::Other => other = Some(entry.target as usize),
+            _ => {}
+        }
+    }
+    other.ok_or(CoreError::InvalidInput("missing other case"))
+}
+
+fn match_exact_number(table: &CaseTable, value: f64) -> Option<usize> {
+    if value < 0.0 {
+        return None;
+    }
+    let candidate = value as u32;
+    if (candidate as f64) != value {
+        return None;
+    }
+    for entry in &table.entries {
+        if let CaseKey::Exact(exact) = entry.key {
+            if exact == candidate {
+                return Some(entry.target as usize);
+            }
+        }
+    }
+    None
+}
+
+fn match_plural_category(table: &CaseTable, category: crate::PluralCategory) -> Option<usize> {
+    for entry in &table.entries {
+        if let CaseKey::Category(case_category) = entry.key {
+            if case_category == category {
+                return Some(entry.target as usize);
+            }
+        }
+    }
+    None
+}
+
+fn match_other(table: &CaseTable) -> CoreResult<usize> {
+    table
+        .entries
+        .iter()
+        .find_map(|entry| match entry.key {
+            CaseKey::Other => Some(entry.target as usize),
+            _ => None,
+        })
+        .ok_or(CoreError::InvalidInput("missing other case"))
 }
 
 fn clone_value(value: &Value) -> CoreResult<Value> {
@@ -187,5 +322,79 @@ mod tests {
         let args = Args::new();
         let out = execute(&program, &args, &backend).expect("exec ok");
         assert_eq!(out, "num:3.5");
+    }
+
+    #[test]
+    fn executes_select_branch() {
+        let backend = TestBackend;
+        let mut program = BytecodeProgram::new();
+        let key_arg = program.push_arg_name("key");
+        let key_idx = program.string_pool.push("x");
+        let foo_idx = program.string_pool.push("foo");
+        let bar_idx = program.string_pool.push("bar");
+        program.case_tables.push(crate::CaseTable {
+            entries: vec![
+                crate::CaseEntry {
+                    key: crate::CaseKey::String(key_idx),
+                    target: 1,
+                },
+                crate::CaseEntry {
+                    key: crate::CaseKey::Other,
+                    target: 3,
+                },
+            ],
+        });
+        program.opcodes = vec![
+            Opcode::Select {
+                aidx: key_arg,
+                table: 0,
+            },
+            Opcode::EmitText { sidx: foo_idx },
+            Opcode::Jump { rel: 2 },
+            Opcode::EmitText { sidx: bar_idx },
+            Opcode::End,
+        ];
+
+        let mut args = Args::new();
+        args.insert("key", Value::Str(String::from("x")));
+        let out = execute(&program, &args, &backend).expect("exec ok");
+        assert_eq!(out, "foo");
+    }
+
+    #[test]
+    fn executes_plural_branch() {
+        let backend = TestBackend;
+        let mut program = BytecodeProgram::new();
+        let count_arg = program.push_arg_name("count");
+        let one_idx = program.string_pool.push("one");
+        let other_idx = program.string_pool.push("other");
+        program.case_tables.push(crate::CaseTable {
+            entries: vec![
+                crate::CaseEntry {
+                    key: crate::CaseKey::Exact(1),
+                    target: 1,
+                },
+                crate::CaseEntry {
+                    key: crate::CaseKey::Other,
+                    target: 3,
+                },
+            ],
+        });
+        program.opcodes = vec![
+            Opcode::SelectPlural {
+                aidx: count_arg,
+                ruleset: crate::PluralRuleset::Cardinal,
+                table: 0,
+            },
+            Opcode::EmitText { sidx: one_idx },
+            Opcode::Jump { rel: 2 },
+            Opcode::EmitText { sidx: other_idx },
+            Opcode::End,
+        ];
+
+        let mut args = Args::new();
+        args.insert("count", Value::Num(2.0));
+        let out = execute(&program, &args, &backend).expect("exec ok");
+        assert_eq!(out, "other");
     }
 }
