@@ -6,5 +6,6 @@ mod error;
 mod lexer;
 mod parser;
 mod validator;
+mod compiler;
 
 fn main() {}

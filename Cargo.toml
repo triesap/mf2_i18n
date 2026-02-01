@@ -20,6 +20,7 @@ unsafe_code = "forbid"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 toml = "0.8"
+mf2-i18n-core = { path = "crates/mf2-i18n-core" }
 
 [profile.release]
 codegen-units = 1
