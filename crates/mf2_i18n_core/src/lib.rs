@@ -8,6 +8,7 @@ extern crate std;
 mod error;
 mod args;
 mod bytecode;
+mod catalog;
 mod format_backend;
 mod interpreter;
 mod language_tag;
@@ -18,6 +19,7 @@ pub use args::{ArgType, Args, Value};
 pub use bytecode::{
     BytecodeProgram, CaseEntry, CaseKey, CaseTable, Opcode, PluralRuleset, StringPool,
 };
+pub use catalog::{Catalog, CatalogChain};
 pub use interpreter::execute;
 pub use error::{CoreError, CoreResult};
 pub use format_backend::{
