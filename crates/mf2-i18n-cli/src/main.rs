@@ -4,6 +4,7 @@ mod config;
 mod catalog;
 mod diagnostic;
 mod error;
+mod extract;
 mod model;
 mod id_map;
 mod lexer;
