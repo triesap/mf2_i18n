@@ -1,5 +1,5 @@
 [package]
-name = "mf2_i18n_leptos"
+name = "mf2-i18n-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,3 +9,6 @@ readme.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+toml = "0.8"

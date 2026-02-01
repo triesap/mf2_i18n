@@ -1,5 +1,5 @@
 [package]
-name = "mf2_i18n_cli"
+name = "mf2-i18n-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,11 @@ repository.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "mf2_i18n_core"
+
+[features]
+default = []
+std = []
+
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "1.0"
-toml = "0.8"

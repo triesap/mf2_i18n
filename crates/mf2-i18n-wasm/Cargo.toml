@@ -1,5 +1,5 @@
 [package]
-name = "mf2_i18n_runtime"
+name = "mf2-i18n-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,5 +7,8 @@ authors.workspace = true
 repository.workspace = true
 readme.workspace = true
 rust-version.workspace = true
+
+[lib]
+name = "mf2_i18n_wasm"
 
 [dependencies]
