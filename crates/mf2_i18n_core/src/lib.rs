@@ -6,5 +6,7 @@ extern crate alloc;
 extern crate std;
 
 mod error;
+mod types;
 
 pub use error::{CoreError, CoreResult};
+pub use types::{Key, MessageId};
