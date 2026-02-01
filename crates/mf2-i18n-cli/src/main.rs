@@ -3,6 +3,7 @@
 mod config;
 mod catalog;
 mod catalog_builder;
+mod artifacts;
 mod diagnostic;
 mod error;
 mod extract;
