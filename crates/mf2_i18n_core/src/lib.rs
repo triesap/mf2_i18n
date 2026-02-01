@@ -12,6 +12,7 @@ mod catalog;
 mod format_backend;
 mod interpreter;
 mod pack;
+mod pack_decode;
 mod language_tag;
 mod negotiation;
 mod types;
@@ -23,6 +24,9 @@ pub use bytecode::{
 pub use catalog::{Catalog, CatalogChain};
 pub use interpreter::execute;
 pub use pack::{parse_pack_header, parse_section_directory, PackHeader, PackKind, SectionEntry};
+pub use pack_decode::{
+    decode_dense_index, decode_sparse_index, decode_string_pool, read_bytecode_at,
+};
 pub use error::{CoreError, CoreResult};
 pub use format_backend::{
     format_value, FormatBackend, FormatterId, FormatterOption, FormatterOptionValue, PluralCategory,
