@@ -46,6 +46,10 @@ impl IdMap {
         Ok(())
     }
 
+    pub fn get(&self, key: &str) -> Option<MessageId> {
+        self.entries.get(key).copied()
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = (&str, MessageId)> {
         self.entries.iter().map(|(k, v)| (k.as_str(), *v))
     }
@@ -111,6 +115,7 @@ mod tests {
         let salt = b"project-salt";
         let keys = vec!["b".to_string(), "a".to_string()];
         let map = build_id_map(keys, salt).expect("map");
+        assert!(map.get("a").is_some());
         let hash_a = map.hash().expect("hash");
         let hash_b = map.hash().expect("hash");
         assert_eq!(hash_a, hash_b);
