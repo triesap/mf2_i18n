@@ -1,28 +1,6 @@
 use crate::diagnostic::Diagnostic;
+use crate::model::{ArgType, MessageSpec};
 use crate::parser::{CaseKey, Expr, Message, Segment, SelectExpr, SelectKind, VarExpr};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ArgType {
-    Str,
-    Num,
-    Bool,
-    DateTime,
-    Unit,
-    Currency,
-    Any,
-}
-
-#[derive(Debug, Clone)]
-pub struct ArgSpec {
-    pub name: String,
-    pub arg_type: ArgType,
-}
-
-#[derive(Debug, Clone)]
-pub struct MessageSpec {
-    pub key: String,
-    pub args: Vec<ArgSpec>,
-}
 
 pub fn validate_message(message: &Message, spec: &MessageSpec) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -78,8 +56,8 @@ fn validate_select(select: &SelectExpr, spec: &MessageSpec, diagnostics: &mut Ve
     }
     if let Some(arg) = spec.args.iter().find(|arg| arg.name == select.selector) {
         let required = match select.kind {
-            SelectKind::Select => ArgType::Str,
-            SelectKind::Plural => ArgType::Num,
+            SelectKind::Select => ArgType::String,
+            SelectKind::Plural => ArgType::Number,
         };
         if arg.arg_type != ArgType::Any && arg.arg_type != required {
             diagnostics.push(
@@ -108,7 +86,7 @@ fn is_known_formatter(name: &str) -> bool {
 
 fn formatter_accepts_arg(formatter: &str, arg_type: &ArgType) -> bool {
     match formatter {
-        "number" => matches!(arg_type, ArgType::Num | ArgType::Any),
+        "number" => matches!(arg_type, ArgType::Number | ArgType::Any),
         "date" | "time" | "datetime" => matches!(arg_type, ArgType::DateTime | ArgType::Any),
         "unit" => matches!(arg_type, ArgType::Unit | ArgType::Any),
         "currency" => matches!(arg_type, ArgType::Currency | ArgType::Any),
@@ -119,7 +97,8 @@ fn formatter_accepts_arg(formatter: &str, arg_type: &ArgType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_message, ArgSpec, ArgType, MessageSpec};
+    use super::{validate_message, ArgType, MessageSpec};
+    use crate::model::ArgSpec;
     use crate::parser::parse_message;
 
     fn spec(args: Vec<ArgSpec>) -> MessageSpec {
@@ -143,7 +122,8 @@ mod tests {
             &message,
             &spec(vec![ArgSpec {
                 name: "count".to_string(),
-                arg_type: ArgType::Num,
+                arg_type: ArgType::Number,
+                required: true,
             }]),
         );
         assert!(diagnostics.iter().any(|d| d.code == "MF2E010"));
@@ -156,7 +136,8 @@ mod tests {
             &message,
             &spec(vec![ArgSpec {
                 name: "value".to_string(),
-                arg_type: ArgType::Str,
+                arg_type: ArgType::String,
+                required: true,
             }]),
         );
         assert!(diagnostics.iter().any(|d| d.code == "MF2E030"));
@@ -169,7 +150,8 @@ mod tests {
             &message,
             &spec(vec![ArgSpec {
                 name: "value".to_string(),
-                arg_type: ArgType::Str,
+                arg_type: ArgType::String,
+                required: true,
             }]),
         );
         assert!(diagnostics.iter().any(|d| d.code == "MF2E021"));
