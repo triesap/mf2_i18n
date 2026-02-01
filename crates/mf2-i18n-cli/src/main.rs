@@ -4,6 +4,7 @@ mod config;
 mod catalog;
 mod catalog_builder;
 mod artifacts;
+mod command_extract;
 mod diagnostic;
 mod error;
 mod extract;
