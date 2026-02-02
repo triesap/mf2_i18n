@@ -26,6 +26,7 @@ sha2 = "0.10"
 thiserror = "1.0"
 toml = "0.8"
 mf2-i18n-core = { path = "crates/mf2-i18n-core" }
+mf2-i18n-runtime = { path = "crates/mf2-i18n-runtime" }
 
 [profile.release]
 codegen-units = 1
