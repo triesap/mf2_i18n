@@ -12,6 +12,7 @@ rust-version.workspace = true
 name = "mf2_i18n_runtime"
 
 [dependencies]
+ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

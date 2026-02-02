@@ -20,6 +20,8 @@ pub enum RuntimeError {
     MissingMessage(String),
     #[error("invalid manifest: {0}")]
     InvalidManifest(String),
+    #[error("signature verification failed")]
+    SignatureFailed,
 }
 
 pub type RuntimeResult<T> = Result<T, RuntimeError>;
