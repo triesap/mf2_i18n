@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::command_build::{run_build, BuildCommandError, BuildOptions};
 use crate::command_extract::{run_extract, ExtractCommandError, ExtractOptions};
+use crate::command_sign::{run_sign, SignCommandError, SignOptions};
 use crate::command_validate::{run_validate, ValidateCommandError, ValidateOptions};
 
 #[derive(Debug, Error)]
@@ -16,6 +17,8 @@ pub enum CliAppError {
     Validate(#[from] ValidateCommandError),
     #[error(transparent)]
     Build(#[from] BuildCommandError),
+    #[error(transparent)]
+    Sign(#[from] SignCommandError),
 }
 
 pub fn run() -> Result<(), CliAppError> {
@@ -39,6 +42,11 @@ pub fn run() -> Result<(), CliAppError> {
         "build" => {
             let options = parse_build_options(args.collect())?;
             run_build(&options)?;
+            Ok(())
+        }
+        "sign" => {
+            let options = parse_sign_options(args.collect())?;
+            run_sign(&options)?;
             Ok(())
         }
         _ => Err(CliAppError::Usage(usage())),
@@ -85,7 +93,7 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2-i18n-cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2-i18n-cli build --catalog <path> --id-map-hash <path> --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]".to_string()
+    "usage: mf2-i18n-cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2-i18n-cli build --catalog <path> --id-map-hash <path> --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]".to_string()
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
@@ -149,9 +157,36 @@ fn parse_build_options(args: Vec<String>) -> Result<BuildOptions, CliAppError> {
     })
 }
 
+fn parse_sign_options(args: Vec<String>) -> Result<SignOptions, CliAppError> {
+    let mut manifest_path = None;
+    let mut key_path = None;
+    let mut key_id = None;
+    let mut out_path = None;
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--manifest" => manifest_path = Some(PathBuf::from(next_value("--manifest", &mut iter)?)),
+            "--key" => key_path = Some(PathBuf::from(next_value("--key", &mut iter)?)),
+            "--key-id" => key_id = Some(next_value("--key-id", &mut iter)?),
+            "--out" => out_path = Some(PathBuf::from(next_value("--out", &mut iter)?)),
+            "--help" | "-h" => return Err(CliAppError::Usage(usage())),
+            _ => return Err(CliAppError::Usage(usage())),
+        }
+    }
+    let manifest_path = manifest_path.ok_or_else(|| CliAppError::Usage(usage()))?;
+    let key_path = key_path.ok_or_else(|| CliAppError::Usage(usage()))?;
+    let key_id = key_id.ok_or_else(|| CliAppError::Usage(usage()))?;
+    Ok(SignOptions {
+        manifest_path,
+        key_path,
+        key_id,
+        out_path,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_build_options, parse_extract_options, parse_validate_options};
+    use super::{parse_build_options, parse_extract_options, parse_sign_options, parse_validate_options};
 
     #[test]
     fn parses_extract_options() {
@@ -194,5 +229,19 @@ mod tests {
         ];
         let options = parse_build_options(args).expect("options");
         assert_eq!(options.release_id, "r1");
+    }
+
+    #[test]
+    fn parses_sign_options() {
+        let args = vec![
+            "--manifest".to_string(),
+            "manifest.json".to_string(),
+            "--key".to_string(),
+            "signing.key".to_string(),
+            "--key-id".to_string(),
+            "key-1".to_string(),
+        ];
+        let options = parse_sign_options(args).expect("options");
+        assert!(options.manifest_path.ends_with("manifest.json"));
     }
 }

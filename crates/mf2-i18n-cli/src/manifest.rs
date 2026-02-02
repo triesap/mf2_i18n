@@ -44,6 +44,12 @@ impl Manifest {
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
     }
+
+    pub fn to_signing_bytes(&self) -> Vec<u8> {
+        let mut clone = self.clone();
+        clone.signing = None;
+        serde_json::to_vec(&clone).unwrap_or_default()
+    }
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
