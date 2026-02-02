@@ -3,6 +3,7 @@
 mod config;
 mod catalog;
 mod catalog_builder;
+mod catalog_reader;
 mod artifacts;
 mod cli;
 mod command_extract;
