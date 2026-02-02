@@ -10,6 +10,7 @@ mod diagnostic;
 mod error;
 mod extract;
 mod extract_pipeline;
+mod mf2_source;
 mod model;
 mod id_map;
 mod lexer;
