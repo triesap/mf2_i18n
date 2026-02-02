@@ -14,6 +14,7 @@ mod extract;
 mod extract_pipeline;
 mod mf2_source;
 mod model;
+mod pack_encode;
 mod id_map;
 mod lexer;
 mod locale_sources;
