@@ -5,6 +5,7 @@ use thiserror::Error;
 use crate::command_build::{run_build, BuildCommandError, BuildOptions};
 use crate::command_extract::{run_extract, ExtractCommandError, ExtractOptions};
 use crate::command_sign::{run_sign, SignCommandError, SignOptions};
+use crate::command_pseudo::{run_pseudo, PseudoCommandError, PseudoOptions};
 use crate::command_validate::{run_validate, ValidateCommandError, ValidateOptions};
 
 #[derive(Debug, Error)]
@@ -19,6 +20,8 @@ pub enum CliAppError {
     Build(#[from] BuildCommandError),
     #[error(transparent)]
     Sign(#[from] SignCommandError),
+    #[error(transparent)]
+    Pseudo(#[from] PseudoCommandError),
 }
 
 pub fn run() -> Result<(), CliAppError> {
@@ -47,6 +50,11 @@ pub fn run() -> Result<(), CliAppError> {
         "sign" => {
             let options = parse_sign_options(args.collect())?;
             run_sign(&options)?;
+            Ok(())
+        }
+        "pseudo" => {
+            let options = parse_pseudo_options(args.collect())?;
+            run_pseudo(&options)?;
             Ok(())
         }
         _ => Err(CliAppError::Usage(usage())),
@@ -93,7 +101,7 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2-i18n-cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2-i18n-cli build --catalog <path> --id-map-hash <path> --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]".to_string()
+    "usage: mf2-i18n-cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2-i18n-cli build --catalog <path> --id-map-hash <path> --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]\n       mf2-i18n-cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>]".to_string()
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
@@ -184,9 +192,35 @@ fn parse_sign_options(args: Vec<String>) -> Result<SignOptions, CliAppError> {
     })
 }
 
+fn parse_pseudo_options(args: Vec<String>) -> Result<PseudoOptions, CliAppError> {
+    let mut locale = None;
+    let mut target = None;
+    let mut out_dir = PathBuf::from("locales");
+    let mut config_path = PathBuf::from("mf2-i18n.toml");
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--locale" => locale = Some(next_value("--locale", &mut iter)?),
+            "--target" => target = Some(next_value("--target", &mut iter)?),
+            "--out" => out_dir = PathBuf::from(next_value("--out", &mut iter)?),
+            "--config" => config_path = PathBuf::from(next_value("--config", &mut iter)?),
+            "--help" | "-h" => return Err(CliAppError::Usage(usage())),
+            _ => return Err(CliAppError::Usage(usage())),
+        }
+    }
+    let locale = locale.ok_or_else(|| CliAppError::Usage(usage()))?;
+    let target = target.unwrap_or_else(|| "en-xa".to_string());
+    Ok(PseudoOptions {
+        locale,
+        target,
+        out_dir,
+        config_path,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_build_options, parse_extract_options, parse_sign_options, parse_validate_options};
+    use super::{parse_build_options, parse_extract_options, parse_pseudo_options, parse_sign_options, parse_validate_options};
 
     #[test]
     fn parses_extract_options() {
@@ -243,5 +277,18 @@ mod tests {
         ];
         let options = parse_sign_options(args).expect("options");
         assert!(options.manifest_path.ends_with("manifest.json"));
+    }
+
+    #[test]
+    fn parses_pseudo_options() {
+        let args = vec![
+            "--locale".to_string(),
+            "en".to_string(),
+            "--target".to_string(),
+            "en-xa".to_string(),
+        ];
+        let options = parse_pseudo_options(args).expect("options");
+        assert_eq!(options.locale, "en");
+        assert_eq!(options.target, "en-xa");
     }
 }

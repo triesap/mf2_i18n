@@ -10,6 +10,7 @@ mod command_extract;
 mod command_build;
 mod command_validate;
 mod command_sign;
+mod command_pseudo;
 mod diagnostic;
 mod error;
 mod extract;
