@@ -12,3 +12,9 @@ rust-version.workspace = true
 name = "mf2_i18n_runtime"
 
 [dependencies]
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+mf2-i18n-core = { workspace = true }
