@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::command_build::{run_build, BuildCommandError, BuildOptions};
 use crate::command_extract::{run_extract, ExtractCommandError, ExtractOptions};
 use crate::command_validate::{run_validate, ValidateCommandError, ValidateOptions};
 
@@ -13,6 +14,8 @@ pub enum CliAppError {
     Extract(#[from] ExtractCommandError),
     #[error(transparent)]
     Validate(#[from] ValidateCommandError),
+    #[error(transparent)]
+    Build(#[from] BuildCommandError),
 }
 
 pub fn run() -> Result<(), CliAppError> {
@@ -32,6 +35,11 @@ pub fn run() -> Result<(), CliAppError> {
                 Ok(_) => Ok(()),
                 Err(err) => Err(err.into()),
             }
+        }
+        "build" => {
+            let options = parse_build_options(args.collect())?;
+            run_build(&options)?;
+            Ok(())
         }
         _ => Err(CliAppError::Usage(usage())),
     }
@@ -77,7 +85,7 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2-i18n-cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli validate --catalog <path> --id-map-hash <path> [--config <path>]".to_string()
+    "usage: mf2-i18n-cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2-i18n-cli build --catalog <path> --id-map-hash <path> --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]".to_string()
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
@@ -105,9 +113,45 @@ fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppEr
     })
 }
 
+fn parse_build_options(args: Vec<String>) -> Result<BuildOptions, CliAppError> {
+    let mut catalog_path = None;
+    let mut id_map_hash_path = None;
+    let mut release_id = None;
+    let mut generated_at = None;
+    let mut out_dir = PathBuf::from("i18n-build");
+    let mut config_path = PathBuf::from("mf2-i18n.toml");
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--catalog" => catalog_path = Some(PathBuf::from(next_value("--catalog", &mut iter)?)),
+            "--id-map-hash" => {
+                id_map_hash_path = Some(PathBuf::from(next_value("--id-map-hash", &mut iter)?))
+            }
+            "--release-id" => release_id = Some(next_value("--release-id", &mut iter)?),
+            "--generated-at" => generated_at = Some(next_value("--generated-at", &mut iter)?),
+            "--out" => out_dir = PathBuf::from(next_value("--out", &mut iter)?),
+            "--config" => config_path = PathBuf::from(next_value("--config", &mut iter)?),
+            "--help" | "-h" => return Err(CliAppError::Usage(usage())),
+            _ => return Err(CliAppError::Usage(usage())),
+        }
+    }
+    let catalog_path = catalog_path.ok_or_else(|| CliAppError::Usage(usage()))?;
+    let id_map_hash_path = id_map_hash_path.ok_or_else(|| CliAppError::Usage(usage()))?;
+    let release_id = release_id.ok_or_else(|| CliAppError::Usage(usage()))?;
+    let generated_at = generated_at.ok_or_else(|| CliAppError::Usage(usage()))?;
+    Ok(BuildOptions {
+        catalog_path,
+        id_map_hash_path,
+        config_path,
+        out_dir,
+        release_id,
+        generated_at,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_extract_options, parse_validate_options};
+    use super::{parse_build_options, parse_extract_options, parse_validate_options};
 
     #[test]
     fn parses_extract_options() {
@@ -134,5 +178,21 @@ mod tests {
         ];
         let options = parse_validate_options(args).expect("options");
         assert!(options.catalog_path.ends_with("i18n.catalog.json"));
+    }
+
+    #[test]
+    fn parses_build_options() {
+        let args = vec![
+            "--catalog".to_string(),
+            "i18n.catalog.json".to_string(),
+            "--id-map-hash".to_string(),
+            "id_map_hash".to_string(),
+            "--release-id".to_string(),
+            "r1".to_string(),
+            "--generated-at".to_string(),
+            "2026-02-01T00:00:00Z".to_string(),
+        ];
+        let options = parse_build_options(args).expect("options");
+        assert_eq!(options.release_id, "r1");
     }
 }
