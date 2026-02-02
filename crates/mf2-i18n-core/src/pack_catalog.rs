@@ -3,10 +3,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::{
-    decode_dense_index, decode_sparse_index, decode_string_pool, parse_pack_header,
-    parse_section_directory, read_bytecode_at, BytecodeProgram, CaseEntry, CaseKey, CaseTable,
-    Catalog, CoreError, CoreResult, FormatterId, MessageId, PackHeader, PackKind, PluralRuleset,
-    SectionEntry, StringPool,
+    decode_sparse_index, decode_string_pool, parse_pack_header, parse_section_directory,
+    read_bytecode_at, BytecodeProgram, CaseEntry, CaseKey, CaseTable, Catalog, CoreError,
+    CoreResult, FormatterId, MessageId, PackHeader, PackKind, PluralRuleset, SectionEntry,
+    StringPool,
 };
 
 const SECTION_STRING_POOL: u8 = 1;
@@ -49,8 +49,7 @@ impl PackCatalog {
             .get(&SECTION_MESSAGE_INDEX)
             .ok_or(CoreError::InvalidInput("missing message index section"))?;
         let index = match header.pack_kind {
-            PackKind::Base => MessageIndex::Dense(decode_dense_index(index_bytes)?),
-            PackKind::Overlay => MessageIndex::Sparse(decode_sparse_index(index_bytes)?),
+            PackKind::Base | PackKind::Overlay => decode_sparse_index(index_bytes)?,
             PackKind::IcuData => return Err(CoreError::Unsupported("icu data packs not supported")),
         };
 
@@ -59,29 +58,11 @@ impl PackCatalog {
             .ok_or(CoreError::InvalidInput("missing bytecode blob section"))?;
 
         let mut messages = BTreeMap::new();
-        match index {
-            MessageIndex::Dense(offsets) => {
-                for (id, offset) in offsets.into_iter().enumerate() {
-                    if offset == u32::MAX {
-                        continue;
-                    }
-                    let message_id = MessageId::new(id as u32);
-                    let slice = read_bytecode_at(blob, offset)?;
-                    let arg_names = meta.get(&message_id).cloned().unwrap_or_default();
-                    let program =
-                        decode_message(slice, &string_pool, &case_tables, arg_names)?;
-                    messages.insert(message_id, program);
-                }
-            }
-            MessageIndex::Sparse(pairs) => {
-                for (message_id, offset) in pairs {
-                    let slice = read_bytecode_at(blob, offset)?;
-                    let arg_names = meta.get(&message_id).cloned().unwrap_or_default();
-                    let program =
-                        decode_message(slice, &string_pool, &case_tables, arg_names)?;
-                    messages.insert(message_id, program);
-                }
-            }
+        for (message_id, offset) in index {
+            let slice = read_bytecode_at(blob, offset)?;
+            let arg_names = meta.get(&message_id).cloned().unwrap_or_default();
+            let program = decode_message(slice, &string_pool, &case_tables, arg_names)?;
+            messages.insert(message_id, program);
         }
 
         Ok(Self { header, messages })
@@ -96,11 +77,6 @@ impl Catalog for PackCatalog {
     fn lookup(&self, id: MessageId) -> Option<&BytecodeProgram> {
         self.messages.get(&id)
     }
-}
-
-enum MessageIndex {
-    Dense(Vec<u32>),
-    Sparse(Vec<(MessageId, u32)>),
 }
 
 fn map_sections<'a>(
@@ -394,6 +370,7 @@ mod tests {
 
         let mut message_index = Vec::new();
         message_index.extend_from_slice(&1u32.to_le_bytes());
+        message_index.extend_from_slice(&0u32.to_le_bytes());
         message_index.extend_from_slice(&0u32.to_le_bytes());
 
         let mut message = Vec::new();

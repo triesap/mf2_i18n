@@ -256,6 +256,7 @@ mod tests {
         let mut message_index = Vec::new();
         message_index.extend_from_slice(&1u32.to_le_bytes());
         message_index.extend_from_slice(&0u32.to_le_bytes());
+        message_index.extend_from_slice(&0u32.to_le_bytes());
 
         let mut message = Vec::new();
         message.extend_from_slice(&0u32.to_le_bytes());

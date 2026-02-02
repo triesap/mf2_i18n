@@ -198,23 +198,11 @@ fn encode_bytecode_blob(
     }
 
     let index = match pack_kind {
-        PackKind::Base => encode_dense_index(&offsets),
+        PackKind::Base => encode_sparse_index(&offsets),
         PackKind::Overlay => encode_sparse_index(&offsets),
         PackKind::IcuData => Vec::new(),
     };
     (blob, index)
-}
-
-fn encode_dense_index(offsets: &BTreeMap<MessageId, u32>) -> Vec<u8> {
-    let max_id = offsets.keys().map(|id| id.get()).max().unwrap_or(0);
-    let mut bytes = Vec::new();
-    let count = max_id + 1;
-    bytes.extend_from_slice(&count.to_le_bytes());
-    for id in 0..count {
-        let value = offsets.get(&MessageId::new(id)).copied().unwrap_or(u32::MAX);
-        bytes.extend_from_slice(&value.to_le_bytes());
-    }
-    bytes
 }
 
 fn encode_sparse_index(offsets: &BTreeMap<MessageId, u32>) -> Vec<u8> {
