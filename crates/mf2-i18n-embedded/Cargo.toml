@@ -16,3 +16,4 @@ default = []
 std = []
 
 [dependencies]
+mf2-i18n-core = { workspace = true }
