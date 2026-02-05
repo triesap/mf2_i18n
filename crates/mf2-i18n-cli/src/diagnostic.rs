@@ -18,12 +18,7 @@ impl Diagnostic {
         }
     }
 
-    pub fn with_span(
-        mut self,
-        file: impl Into<String>,
-        line: u32,
-        column: u32,
-    ) -> Self {
+    pub fn with_span(mut self, file: impl Into<String>, line: u32, column: u32) -> Self {
         self.file = Some(file.into());
         self.line = Some(line);
         self.column = Some(column);

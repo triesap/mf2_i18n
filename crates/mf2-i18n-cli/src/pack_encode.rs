@@ -22,7 +22,8 @@ pub fn encode_pack(input: &PackBuildInput) -> Vec<u8> {
     let mut remapped_messages = BTreeMap::new();
     let mut case_tables = Vec::new();
     for (message_id, program) in &input.messages {
-        let (remapped, local_tables) = remap_program(program, &mut interner, case_tables.len() as u32);
+        let (remapped, local_tables) =
+            remap_program(program, &mut interner, case_tables.len() as u32);
         case_tables.extend(local_tables);
         remapped_messages.insert(*message_id, remapped);
     }
@@ -31,8 +32,7 @@ pub fn encode_pack(input: &PackBuildInput) -> Vec<u8> {
     let string_section = encode_string_pool(&string_pool);
     let case_section = encode_case_tables(&case_tables);
     let meta_section = encode_message_meta(&remapped_messages, &string_pool);
-    let (blob_section, index_section) =
-        encode_bytecode_blob(&remapped_messages, input.pack_kind);
+    let (blob_section, index_section) = encode_bytecode_blob(&remapped_messages, input.pack_kind);
 
     let mut sections = Vec::new();
     sections.push((1u8, string_section));
@@ -376,7 +376,7 @@ impl StringInterner {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_pack, PackBuildInput};
+    use super::{PackBuildInput, encode_pack};
     use mf2_i18n_core::{BytecodeProgram, Catalog, MessageId, Opcode, PackCatalog, PackKind};
     use std::collections::BTreeMap;
 

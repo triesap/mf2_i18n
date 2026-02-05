@@ -24,22 +24,27 @@ fn validate_var(var: &VarExpr, spec: &MessageSpec, diagnostics: &mut Vec<Diagnos
     if let Some(arg) = spec.args.iter().find(|arg| arg.name == var.name) {
         if let Some(formatter) = &var.formatter {
             if !is_known_formatter(formatter) {
-                diagnostics.push(
-                    Diagnostic::new("MF2E030", "unknown formatter")
-                        .with_span(spec.key.clone(), var.span.line, var.span.column),
-                );
+                diagnostics.push(Diagnostic::new("MF2E030", "unknown formatter").with_span(
+                    spec.key.clone(),
+                    var.span.line,
+                    var.span.column,
+                ));
             } else if !formatter_accepts_arg(formatter, &arg.arg_type) {
                 diagnostics.push(
-                    Diagnostic::new("MF2E021", "variable type mismatch")
-                        .with_span(spec.key.clone(), var.span.line, var.span.column),
+                    Diagnostic::new("MF2E021", "variable type mismatch").with_span(
+                        spec.key.clone(),
+                        var.span.line,
+                        var.span.column,
+                    ),
                 );
             }
         }
     } else {
-        diagnostics.push(
-            Diagnostic::new("MF2E020", "unknown variable")
-                .with_span(spec.key.clone(), var.span.line, var.span.column),
-        );
+        diagnostics.push(Diagnostic::new("MF2E020", "unknown variable").with_span(
+            spec.key.clone(),
+            var.span.line,
+            var.span.column,
+        ));
     }
 }
 
@@ -50,8 +55,11 @@ fn validate_select(select: &SelectExpr, spec: &MessageSpec, diagnostics: &mut Ve
         .any(|case| matches!(case.key, CaseKey::Other) || case.is_default);
     if !has_other {
         diagnostics.push(
-            Diagnostic::new("MF2E010", "missing required other case")
-                .with_span(spec.key.clone(), select.span.line, select.span.column),
+            Diagnostic::new("MF2E010", "missing required other case").with_span(
+                spec.key.clone(),
+                select.span.line,
+                select.span.column,
+            ),
         );
     }
     if let Some(arg) = spec.args.iter().find(|arg| arg.name == select.selector) {
@@ -61,15 +69,19 @@ fn validate_select(select: &SelectExpr, spec: &MessageSpec, diagnostics: &mut Ve
         };
         if arg.arg_type != ArgType::Any && arg.arg_type != required {
             diagnostics.push(
-                Diagnostic::new("MF2E021", "variable type mismatch")
-                    .with_span(spec.key.clone(), select.span.line, select.span.column),
+                Diagnostic::new("MF2E021", "variable type mismatch").with_span(
+                    spec.key.clone(),
+                    select.span.line,
+                    select.span.column,
+                ),
             );
         }
     } else {
-        diagnostics.push(
-            Diagnostic::new("MF2E020", "unknown variable")
-                .with_span(spec.key.clone(), select.span.line, select.span.column),
-        );
+        diagnostics.push(Diagnostic::new("MF2E020", "unknown variable").with_span(
+            spec.key.clone(),
+            select.span.line,
+            select.span.column,
+        ));
     }
 
     for case in &select.cases {
@@ -97,7 +109,7 @@ fn formatter_accepts_arg(formatter: &str, arg_type: &ArgType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_message, ArgType, MessageSpec};
+    use super::{ArgType, MessageSpec, validate_message};
     use crate::model::ArgSpec;
     use crate::parser::parse_message;
 

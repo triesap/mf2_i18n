@@ -15,21 +15,37 @@ pub enum PluralRuleset {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Opcode {
-    EmitText { sidx: StringIndex },
+    EmitText {
+        sidx: StringIndex,
+    },
     EmitStack,
-    PushStr { sidx: StringIndex },
-    PushNum { nidx: NumberIndex },
-    PushArg { aidx: ArgIndex },
+    PushStr {
+        sidx: StringIndex,
+    },
+    PushNum {
+        nidx: NumberIndex,
+    },
+    PushArg {
+        aidx: ArgIndex,
+    },
     Dup,
     Pop,
-    CallFmt { fid: FormatterId, opt_count: u8 },
-    Select { aidx: ArgIndex, table: CaseTableIndex },
+    CallFmt {
+        fid: FormatterId,
+        opt_count: u8,
+    },
+    Select {
+        aidx: ArgIndex,
+        table: CaseTableIndex,
+    },
     SelectPlural {
         aidx: ArgIndex,
         ruleset: PluralRuleset,
         table: CaseTableIndex,
     },
-    Jump { rel: i32 },
+    Jump {
+        rel: i32,
+    },
     End,
 }
 
@@ -58,7 +74,9 @@ pub struct StringPool {
 
 impl StringPool {
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     pub fn push(&mut self, value: impl Into<String>) -> StringIndex {

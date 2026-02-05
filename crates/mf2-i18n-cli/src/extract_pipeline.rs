@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::catalog_builder::{build_catalog, BuildOutput, CatalogBuildError};
-use crate::extract::{extract_messages, ExtractError, ExtractedMessage};
+use crate::catalog_builder::{BuildOutput, CatalogBuildError, build_catalog};
+use crate::extract::{ExtractError, ExtractedMessage, extract_messages};
 
 #[derive(Debug, Error)]
 pub enum ExtractPipelineError {
@@ -138,11 +138,13 @@ mod tests {
         .expect("extract");
 
         let expected = derive_message_id("home.title", b"salt");
-        assert!(output
-            .catalog
-            .messages
-            .iter()
-            .any(|message| message.id == u32::from(expected)));
+        assert!(
+            output
+                .catalog
+                .messages
+                .iter()
+                .any(|message| message.id == u32::from(expected))
+        );
 
         fs::remove_dir_all(&dir).ok();
     }

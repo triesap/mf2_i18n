@@ -69,7 +69,10 @@ impl Compiler {
                 ruleset: PluralRuleset::Cardinal,
                 table: table_idx,
             },
-            SelectKind::Select => Opcode::Select { aidx, table: table_idx },
+            SelectKind::Select => Opcode::Select {
+                aidx,
+                table: table_idx,
+            },
         };
         self.program.opcodes.push(opcode);
 
@@ -101,7 +104,10 @@ impl Compiler {
                     ruleset: PluralRuleset::Cardinal,
                     table: table_idx,
                 },
-                SelectKind::Select => Opcode::Select { aidx, table: table_idx },
+                SelectKind::Select => Opcode::Select {
+                    aidx,
+                    table: table_idx,
+                },
             };
         }
 
@@ -130,11 +136,7 @@ fn formatter_id(name: &str) -> FormatterId {
     }
 }
 
-fn compile_case_key(
-    program: &mut BytecodeProgram,
-    key: &AstCaseKey,
-    is_default: bool,
-) -> CaseKey {
+fn compile_case_key(program: &mut BytecodeProgram, key: &AstCaseKey, is_default: bool) -> CaseKey {
     if is_default {
         return CaseKey::Other;
     }

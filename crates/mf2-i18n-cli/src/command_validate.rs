@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::catalog_reader::{load_catalog, CatalogReadError};
+use crate::catalog_reader::{CatalogReadError, load_catalog};
 use crate::config::load_config_or_default;
 use crate::diagnostic::Diagnostic;
-use crate::locale_sources::{load_locales, LocaleBundle, LocaleSourceError};
+use crate::locale_sources::{LocaleBundle, LocaleSourceError, load_locales};
 use crate::parser::parse_message;
 use crate::validator::validate_message;
 
@@ -100,10 +100,11 @@ fn validate_locale(
 
     for (key, entry) in &locale.messages {
         if !specs.contains_key(key) {
-            diagnostics.push(
-                Diagnostic::new("MF2E101", "unknown key")
-                    .with_span(entry.file.clone(), entry.line, 1),
-            );
+            diagnostics.push(Diagnostic::new("MF2E101", "unknown key").with_span(
+                entry.file.clone(),
+                entry.line,
+                1,
+            ));
         }
     }
 
@@ -112,7 +113,7 @@ fn validate_locale(
 
 #[cfg(test)]
 mod tests {
-    use super::{run_validate, ValidateOptions};
+    use super::{ValidateOptions, run_validate};
     use crate::catalog::{Catalog, CatalogFeatures, CatalogMessage};
     use crate::model::{ArgSpec, ArgType};
     use std::fs;
@@ -167,8 +168,11 @@ mod tests {
         let catalog_path = dir.join("i18n.catalog.json");
         fs::write(&catalog_path, serde_json::to_string(&catalog).unwrap()).expect("catalog");
         let hash_path = dir.join("id_map_hash");
-        fs::write(&hash_path, "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-            .expect("hash");
+        fs::write(
+            &hash_path,
+            "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        )
+        .expect("hash");
 
         let config_path = dir.join("mf2-i18n.toml");
         fs::write(

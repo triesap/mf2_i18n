@@ -16,7 +16,9 @@ pub fn verify_manifest_signature(
         return Err(RuntimeError::InvalidManifest("key id mismatch".to_string()));
     }
     if signing.sig_alg != "ed25519" {
-        return Err(RuntimeError::InvalidManifest("unsupported signature".to_string()));
+        return Err(RuntimeError::InvalidManifest(
+            "unsupported signature".to_string(),
+        ));
     }
     let signature = parse_signature(&signing.manifest_sig)?;
     let bytes = manifest.to_signing_bytes()?;
@@ -28,7 +30,8 @@ pub fn verify_manifest_signature(
 fn parse_signature(value: &str) -> RuntimeResult<Signature> {
     let trimmed = value.trim();
     let hex = trimmed.strip_prefix("hex:").unwrap_or(trimmed);
-    let bytes = hex::decode(hex).map_err(|_| RuntimeError::InvalidManifest("invalid signature".to_string()))?;
+    let bytes = hex::decode(hex)
+        .map_err(|_| RuntimeError::InvalidManifest("invalid signature".to_string()))?;
     Signature::from_slice(&bytes)
         .map_err(|_| RuntimeError::InvalidManifest("invalid signature".to_string()))
 }

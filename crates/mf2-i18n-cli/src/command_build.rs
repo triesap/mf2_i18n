@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::catalog_reader::{load_catalog, CatalogReadError};
-use crate::command_validate::{run_validate, ValidateCommandError, ValidateOptions};
+use crate::catalog_reader::{CatalogReadError, load_catalog};
+use crate::command_validate::{ValidateCommandError, ValidateOptions, run_validate};
 use crate::compiler::compile_message;
 use crate::config::load_config_or_default;
-use crate::locale_sources::{load_locales, LocaleSourceError};
-use crate::manifest::{sha256_hex, Manifest, PackEntry};
-use crate::micro_locales::{load_micro_locales, MicroLocaleError};
-use crate::pack_encode::{encode_pack, PackBuildInput};
+use crate::locale_sources::{LocaleSourceError, load_locales};
+use crate::manifest::{Manifest, PackEntry, sha256_hex};
+use crate::micro_locales::{MicroLocaleError, load_micro_locales};
+use crate::pack_encode::{PackBuildInput, encode_pack};
 use crate::parser::parse_message;
 
 #[derive(Debug, Error)]
@@ -60,12 +60,13 @@ pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
     })?;
 
     let locales = load_locales(&roots)?;
-    let micro_locale_map = load_micro_locales(
-        &resolve_path(
-            &options.config_path,
-            config.micro_locales_registry.as_deref().unwrap_or("micro-locales.toml"),
-        ),
-    )?;
+    let micro_locale_map = load_micro_locales(&resolve_path(
+        &options.config_path,
+        config
+            .micro_locales_registry
+            .as_deref()
+            .unwrap_or("micro-locales.toml"),
+    ))?;
 
     fs::create_dir_all(&options.out_dir)?;
     let packs_dir = options.out_dir.join("packs");
@@ -134,14 +135,12 @@ pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
 fn compile_locale_messages(
     locale: &crate::locale_sources::LocaleBundle,
     catalog: &crate::catalog::Catalog,
-) -> Result<BTreeMap<mf2_i18n_core::MessageId, mf2_i18n_core::BytecodeProgram>, BuildCommandError>
-{
+) -> Result<BTreeMap<mf2_i18n_core::MessageId, mf2_i18n_core::BytecodeProgram>, BuildCommandError> {
     let mut messages = BTreeMap::new();
     for message in &catalog.messages {
-        let entry = locale
-            .messages
-            .get(&message.key)
-            .ok_or_else(|| BuildCommandError::MissingMessage(message.key.clone(), locale.locale.clone()))?;
+        let entry = locale.messages.get(&message.key).ok_or_else(|| {
+            BuildCommandError::MissingMessage(message.key.clone(), locale.locale.clone())
+        })?;
         let parsed = parse_message(&entry.value)
             .map_err(|err| BuildCommandError::ParseError(message.key.clone(), err.message))?;
         let compiled = compile_message(&parsed);
@@ -163,7 +162,7 @@ fn resolve_path(config_path: &Path, value: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_build, BuildOptions};
+    use super::{BuildOptions, run_build};
     use crate::catalog::{Catalog, CatalogFeatures, CatalogMessage};
     use std::fs;
     use std::path::PathBuf;
@@ -203,8 +202,11 @@ mod tests {
         let catalog_path = dir.join("i18n.catalog.json");
         fs::write(&catalog_path, serde_json::to_string(&catalog).unwrap()).expect("catalog");
         let hash_path = dir.join("id_map_hash");
-        fs::write(&hash_path, "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-            .expect("hash");
+        fs::write(
+            &hash_path,
+            "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        )
+        .expect("hash");
 
         let config_path = dir.join("mf2-i18n.toml");
         fs::write(

@@ -43,9 +43,18 @@ pub trait FormatBackend {
     fn format_date(&self, value: i64, options: &[FormatterOption]) -> CoreResult<String>;
     fn format_time(&self, value: i64, options: &[FormatterOption]) -> CoreResult<String>;
     fn format_datetime(&self, value: i64, options: &[FormatterOption]) -> CoreResult<String>;
-    fn format_unit(&self, value: f64, unit_id: u32, options: &[FormatterOption]) -> CoreResult<String>;
-    fn format_currency(&self, value: f64, code: [u8; 3], options: &[FormatterOption])
-        -> CoreResult<String>;
+    fn format_unit(
+        &self,
+        value: f64,
+        unit_id: u32,
+        options: &[FormatterOption],
+    ) -> CoreResult<String>;
+    fn format_currency(
+        &self,
+        value: f64,
+        code: [u8; 3],
+        options: &[FormatterOption],
+    ) -> CoreResult<String>;
 }
 
 pub fn format_value(
@@ -91,7 +100,8 @@ fn format_value_default(value: &Value) -> CoreResult<String> {
         Value::DateTime(timestamp) => Ok(timestamp.to_string()),
         Value::Unit { value, unit_id } => Ok(format!("{value}:{unit_id}")),
         Value::Currency { value, code } => {
-            let code = core::str::from_utf8(code).map_err(|_| CoreError::InvalidInput("currency code"))?;
+            let code =
+                core::str::from_utf8(code).map_err(|_| CoreError::InvalidInput("currency code"))?;
             Ok(format!("{value}:{code}"))
         }
         Value::Any(_) => Err(CoreError::Unsupported("identity formatting for any value")),
@@ -103,7 +113,7 @@ mod tests {
     use alloc::format;
     use alloc::string::String;
 
-    use super::{format_value, FormatBackend, FormatterId, FormatterOption, PluralCategory};
+    use super::{FormatBackend, FormatterId, FormatterOption, PluralCategory, format_value};
     use crate::Value;
 
     struct TestBackend;
@@ -113,19 +123,35 @@ mod tests {
             Ok(PluralCategory::Other)
         }
 
-        fn format_number(&self, value: f64, _options: &[FormatterOption]) -> crate::CoreResult<String> {
+        fn format_number(
+            &self,
+            value: f64,
+            _options: &[FormatterOption],
+        ) -> crate::CoreResult<String> {
             Ok(format!("num:{value}"))
         }
 
-        fn format_date(&self, value: i64, _options: &[FormatterOption]) -> crate::CoreResult<String> {
+        fn format_date(
+            &self,
+            value: i64,
+            _options: &[FormatterOption],
+        ) -> crate::CoreResult<String> {
             Ok(format!("date:{value}"))
         }
 
-        fn format_time(&self, value: i64, _options: &[FormatterOption]) -> crate::CoreResult<String> {
+        fn format_time(
+            &self,
+            value: i64,
+            _options: &[FormatterOption],
+        ) -> crate::CoreResult<String> {
             Ok(format!("time:{value}"))
         }
 
-        fn format_datetime(&self, value: i64, _options: &[FormatterOption]) -> crate::CoreResult<String> {
+        fn format_datetime(
+            &self,
+            value: i64,
+            _options: &[FormatterOption],
+        ) -> crate::CoreResult<String> {
             Ok(format!("datetime:{value}"))
         }
 
@@ -163,7 +189,8 @@ mod tests {
         let backend = TestBackend;
         let options = [];
         let value = Value::Str(String::from("hello"));
-        let out = format_value(&backend, FormatterId::Identity, &value, &options).expect("format ok");
+        let out =
+            format_value(&backend, FormatterId::Identity, &value, &options).expect("format ok");
         assert_eq!(out, "hello");
     }
 }

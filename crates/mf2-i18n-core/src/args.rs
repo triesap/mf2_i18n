@@ -121,6 +121,9 @@ mod tests {
         let err = args
             .validate_type("count", ArgType::Str)
             .expect_err("type mismatch should error");
-        assert_eq!(err, crate::CoreError::InvalidInput("argument type mismatch"));
+        assert_eq!(
+            err,
+            crate::CoreError::InvalidInput("argument type mismatch")
+        );
     }
 }

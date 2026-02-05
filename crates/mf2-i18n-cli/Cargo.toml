@@ -7,6 +7,9 @@ authors.workspace = true
 repository.workspace = true
 readme.workspace = true
 rust-version.workspace = true
+description = "CLI tools for building and validating Unicode MessageFormat v2 (MF2) assets."
+keywords = ["i18n", "messageformat", "localization", "unicode", "mf2"]
+categories = ["internationalization", "text-processing"]
 
 [dependencies]
 blake3 = { workspace = true }

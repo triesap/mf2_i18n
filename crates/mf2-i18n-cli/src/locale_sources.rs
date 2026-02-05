@@ -8,7 +8,6 @@ use crate::mf2_source::parse_mf2_source;
 
 #[derive(Debug, Clone)]
 pub struct LocaleMessage {
-    pub key: String,
     pub value: String,
     pub file: String,
     pub line: u32,
@@ -57,7 +56,10 @@ pub fn load_locales(roots: &[PathBuf]) -> Result<Vec<LocaleBundle>, LocaleSource
     Ok(bundles)
 }
 
-fn load_locale_dir(path: &Path, locale: &str) -> Result<BTreeMap<String, LocaleMessage>, LocaleSourceError> {
+fn load_locale_dir(
+    path: &Path,
+    locale: &str,
+) -> Result<BTreeMap<String, LocaleMessage>, LocaleSourceError> {
     let mut messages = BTreeMap::new();
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -67,16 +69,23 @@ fn load_locale_dir(path: &Path, locale: &str) -> Result<BTreeMap<String, LocaleM
         }
         let contents = fs::read_to_string(&file_path)?;
         let entries = parse_mf2_source(&contents).map_err(|err| {
-            LocaleSourceError::Parse(format!("{}:{} {}", file_path.display(), err.line, err.message))
+            LocaleSourceError::Parse(format!(
+                "{}:{} {}",
+                file_path.display(),
+                err.line,
+                err.message
+            ))
         })?;
         for entry in entries {
             if messages.contains_key(&entry.key) {
-                return Err(LocaleSourceError::DuplicateKey(entry.key, locale.to_string()));
+                return Err(LocaleSourceError::DuplicateKey(
+                    entry.key,
+                    locale.to_string(),
+                ));
             }
             messages.insert(
                 entry.key.clone(),
                 LocaleMessage {
-                    key: entry.key,
                     value: entry.value,
                     file: file_path.display().to_string(),
                     line: entry.line,

@@ -3,10 +3,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::{
-    decode_sparse_index, decode_string_pool, parse_pack_header, parse_section_directory,
-    read_bytecode_at, BytecodeProgram, CaseEntry, CaseKey, CaseTable, Catalog, CoreError,
-    CoreResult, FormatterId, MessageId, PackHeader, PackKind, PluralRuleset, SectionEntry,
-    StringPool,
+    BytecodeProgram, CaseEntry, CaseKey, CaseTable, Catalog, CoreError, CoreResult, FormatterId,
+    MessageId, PackHeader, PackKind, PluralRuleset, SectionEntry, StringPool, decode_sparse_index,
+    decode_string_pool, parse_pack_header, parse_section_directory, read_bytecode_at,
 };
 
 const SECTION_STRING_POOL: u8 = 1;
@@ -50,7 +49,9 @@ impl PackCatalog {
             .ok_or(CoreError::InvalidInput("missing message index section"))?;
         let index = match header.pack_kind {
             PackKind::Base | PackKind::Overlay => decode_sparse_index(index_bytes)?,
-            PackKind::IcuData => return Err(CoreError::Unsupported("icu data packs not supported")),
+            PackKind::IcuData => {
+                return Err(CoreError::Unsupported("icu data packs not supported"));
+            }
         };
 
         let blob = section_map
@@ -328,7 +329,10 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use super::{PackCatalog, SECTION_BYTECODE_BLOB, SECTION_CASE_TABLES, SECTION_MESSAGE_INDEX, SECTION_MESSAGE_META, SECTION_STRING_POOL};
+    use super::{
+        PackCatalog, SECTION_BYTECODE_BLOB, SECTION_CASE_TABLES, SECTION_MESSAGE_INDEX,
+        SECTION_MESSAGE_META, SECTION_STRING_POOL,
+    };
     use crate::{Catalog, MessageId, Opcode, PackKind};
 
     fn build_header(kind: PackKind, id_map_hash: [u8; 32]) -> Vec<u8> {
@@ -410,6 +414,9 @@ mod tests {
 
         let catalog = PackCatalog::decode(&bytes, &id_map_hash).expect("catalog");
         let program = catalog.lookup(MessageId::new(0)).expect("program");
-        assert_eq!(program.opcodes, vec![Opcode::EmitText { sidx: 0 }, Opcode::End]);
+        assert_eq!(
+            program.opcodes,
+            vec![Opcode::EmitText { sidx: 0 }, Opcode::End]
+        );
     }
 }

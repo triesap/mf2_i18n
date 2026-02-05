@@ -57,9 +57,10 @@ impl IdMap {
     pub fn hash(&self) -> Result<[u8; 32], IdMapError> {
         let mut hasher = Sha256::new();
         for (key, id) in &self.entries {
-            let len: u32 = key.len().try_into().map_err(|_| IdMapError::KeyTooLong {
-                len: key.len(),
-            })?;
+            let len: u32 = key
+                .len()
+                .try_into()
+                .map_err(|_| IdMapError::KeyTooLong { len: key.len() })?;
             hasher.update(len.to_le_bytes());
             hasher.update(key.as_bytes());
             hasher.update(u32::from(*id).to_le_bytes());
@@ -80,9 +81,7 @@ pub fn derive_message_id(key: &str, salt: &[u8]) -> MessageId {
     hasher.update(key.as_bytes());
     let hash = hasher.finalize();
     let bytes = hash.as_bytes();
-    MessageId::new(u32::from_le_bytes([
-        bytes[0], bytes[1], bytes[2], bytes[3],
-    ]))
+    MessageId::new(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 pub fn build_id_map<I>(keys: I, salt: &[u8]) -> Result<IdMap, IdMapError>
@@ -99,7 +98,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{build_id_map, derive_message_id, IdMap, IdMapError};
+    use super::{IdMap, IdMapError, build_id_map, derive_message_id};
     use mf2_i18n_core::MessageId;
 
     #[test]

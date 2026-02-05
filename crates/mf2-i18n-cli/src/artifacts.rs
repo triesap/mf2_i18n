@@ -95,7 +95,11 @@ mod tests {
         let contents = fs::read_to_string(&hash_path).expect("read");
         let expected = derive_message_id("home.title", salt);
         assert!(contents.starts_with("sha256:"));
-        assert!(fs::read_to_string(&id_path).unwrap().contains(&u32::from(expected).to_string()));
+        assert!(
+            fs::read_to_string(&id_path)
+                .unwrap()
+                .contains(&u32::from(expected).to_string())
+        );
         fs::remove_file(&id_path).ok();
         fs::remove_file(&hash_path).ok();
     }

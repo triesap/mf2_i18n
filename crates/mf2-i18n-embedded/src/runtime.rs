@@ -5,8 +5,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use mf2_i18n_core::{
-    execute, negotiate_lookup, Args, Catalog, CoreError, CoreResult, FormatBackend, LanguageTag,
-    PackCatalog, PluralCategory,
+    Args, Catalog, CoreError, CoreResult, FormatBackend, LanguageTag, PackCatalog, PluralCategory,
+    execute, negotiate_lookup,
 };
 
 pub struct EmbeddedPack<'a> {
@@ -28,15 +28,27 @@ impl FormatBackend for BasicFormatBackend {
         Ok(PluralCategory::Other)
     }
 
-    fn format_number(&self, value: f64, _options: &[mf2_i18n_core::FormatterOption]) -> CoreResult<String> {
+    fn format_number(
+        &self,
+        value: f64,
+        _options: &[mf2_i18n_core::FormatterOption],
+    ) -> CoreResult<String> {
         Ok(value.to_string())
     }
 
-    fn format_date(&self, value: i64, _options: &[mf2_i18n_core::FormatterOption]) -> CoreResult<String> {
+    fn format_date(
+        &self,
+        value: i64,
+        _options: &[mf2_i18n_core::FormatterOption],
+    ) -> CoreResult<String> {
         Ok(value.to_string())
     }
 
-    fn format_time(&self, value: i64, _options: &[mf2_i18n_core::FormatterOption]) -> CoreResult<String> {
+    fn format_time(
+        &self,
+        value: i64,
+        _options: &[mf2_i18n_core::FormatterOption],
+    ) -> CoreResult<String> {
         Ok(value.to_string())
     }
 
@@ -126,10 +138,10 @@ impl EmbeddedRuntime {
 #[cfg(test)]
 mod tests {
     use super::{EmbeddedPack, EmbeddedRuntime};
+    use alloc::collections::BTreeMap;
     use alloc::string::ToString;
     use alloc::vec;
     use alloc::vec::Vec;
-    use alloc::collections::BTreeMap;
     use mf2_i18n_core::{Args, MessageId, PackKind};
 
     fn build_pack_bytes(id_map_hash: [u8; 32]) -> Vec<u8> {

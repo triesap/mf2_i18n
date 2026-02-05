@@ -89,7 +89,8 @@ fn is_alpha(value: &str) -> bool {
 }
 
 fn is_region(value: &str) -> bool {
-    (value.len() == 2 && is_alpha(value)) || (value.len() == 3 && value.chars().all(|ch| ch.is_ascii_digit()))
+    (value.len() == 2 && is_alpha(value))
+        || (value.len() == 3 && value.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 fn titlecase(value: &str) -> String {
@@ -117,11 +118,7 @@ mod tests {
         assert_eq!(tag.normalized(), "zh-Hant-TW");
         assert_eq!(
             tag.match_subtags(),
-            &[
-                String::from("zh"),
-                String::from("Hant"),
-                String::from("TW")
-            ]
+            &[String::from("zh"), String::from("Hant"), String::from("TW")]
         );
     }
 
@@ -154,6 +151,9 @@ mod tests {
     #[test]
     fn rejects_empty_subtag() {
         let err = LanguageTag::parse("en--US").expect_err("empty subtag should fail");
-        assert_eq!(err, crate::CoreError::InvalidInput("language tag has empty subtag"));
+        assert_eq!(
+            err,
+            crate::CoreError::InvalidInput("language tag has empty subtag")
+        );
     }
 }

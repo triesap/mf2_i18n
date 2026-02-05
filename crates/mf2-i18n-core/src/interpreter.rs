@@ -2,8 +2,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::{
-    format_value, Args, BytecodeProgram, CaseKey, CaseTable, CoreError, CoreResult, FormatBackend,
-    FormatterId, Opcode, PluralRuleset, Value,
+    Args, BytecodeProgram, CaseKey, CaseTable, CoreError, CoreResult, FormatBackend, FormatterId,
+    Opcode, PluralRuleset, Value, format_value,
 };
 
 pub fn execute(
@@ -26,7 +26,9 @@ pub fn execute(
                 output.push_str(text);
             }
             Opcode::EmitStack => {
-                let value = stack.pop().ok_or(CoreError::InvalidInput("stack underflow"))?;
+                let value = stack
+                    .pop()
+                    .ok_or(CoreError::InvalidInput("stack underflow"))?;
                 let rendered = format_value(backend, FormatterId::Identity, &value, &[])?;
                 output.push_str(&rendered);
             }
@@ -52,17 +54,23 @@ pub fn execute(
                 stack.push(clone_value(value)?);
             }
             Opcode::Dup => {
-                let value = stack.last().ok_or(CoreError::InvalidInput("stack underflow"))?;
+                let value = stack
+                    .last()
+                    .ok_or(CoreError::InvalidInput("stack underflow"))?;
                 stack.push(clone_value(value)?);
             }
             Opcode::Pop => {
-                let _ = stack.pop().ok_or(CoreError::InvalidInput("stack underflow"))?;
+                let _ = stack
+                    .pop()
+                    .ok_or(CoreError::InvalidInput("stack underflow"))?;
             }
             Opcode::CallFmt { fid, opt_count } => {
                 if opt_count != 0 {
                     return Err(CoreError::Unsupported("formatter options not supported"));
                 }
-                let value = stack.pop().ok_or(CoreError::InvalidInput("stack underflow"))?;
+                let value = stack
+                    .pop()
+                    .ok_or(CoreError::InvalidInput("stack underflow"))?;
                 let rendered = format_value(backend, fid, &value, &[])?;
                 stack.push(Value::Str(rendered));
             }
@@ -143,10 +151,7 @@ fn select_plural_case(
     match_other(table)
 }
 
-fn get_case_table<'a>(
-    program: &'a BytecodeProgram,
-    table_idx: u32,
-) -> CoreResult<&'a CaseTable> {
+fn get_case_table<'a>(program: &'a BytecodeProgram, table_idx: u32) -> CoreResult<&'a CaseTable> {
     program
         .case_tables
         .get(table_idx as usize)
@@ -248,19 +253,35 @@ mod tests {
             Ok(PluralCategory::Other)
         }
 
-        fn format_number(&self, value: f64, _options: &[FormatterOption]) -> crate::CoreResult<String> {
+        fn format_number(
+            &self,
+            value: f64,
+            _options: &[FormatterOption],
+        ) -> crate::CoreResult<String> {
             Ok(format!("num:{value}"))
         }
 
-        fn format_date(&self, value: i64, _options: &[FormatterOption]) -> crate::CoreResult<String> {
+        fn format_date(
+            &self,
+            value: i64,
+            _options: &[FormatterOption],
+        ) -> crate::CoreResult<String> {
             Ok(format!("date:{value}"))
         }
 
-        fn format_time(&self, value: i64, _options: &[FormatterOption]) -> crate::CoreResult<String> {
+        fn format_time(
+            &self,
+            value: i64,
+            _options: &[FormatterOption],
+        ) -> crate::CoreResult<String> {
             Ok(format!("time:{value}"))
         }
 
-        fn format_datetime(&self, value: i64, _options: &[FormatterOption]) -> crate::CoreResult<String> {
+        fn format_datetime(
+            &self,
+            value: i64,
+            _options: &[FormatterOption],
+        ) -> crate::CoreResult<String> {
             Ok(format!("datetime:{value}"))
         }
 

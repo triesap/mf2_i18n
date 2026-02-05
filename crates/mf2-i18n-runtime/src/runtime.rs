@@ -3,17 +3,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mf2_i18n_core::{
-    execute, negotiate_lookup, Args, CatalogChain, FormatBackend, LanguageTag, PackCatalog,
-    PluralCategory,
+    Args, CatalogChain, FormatBackend, LanguageTag, PackCatalog, PluralCategory, execute,
+    negotiate_lookup,
 };
 
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::id_map::IdMap;
 use crate::loader::{load_id_map, load_manifest, parse_sha256};
-use crate::manifest::{Manifest, PackEntry};
+use crate::manifest::PackEntry;
 
 pub struct Runtime {
-    manifest: Manifest,
     id_map: IdMap,
     packs: BTreeMap<String, PackCatalog>,
     parents: BTreeMap<String, String>,
@@ -122,7 +121,6 @@ impl Runtime {
         }
 
         Ok(Self {
-            manifest,
             id_map,
             packs,
             parents,
@@ -338,8 +336,11 @@ mod tests {
         };
 
         let manifest_path = root.join("manifest.json");
-        fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).expect("json"))
-            .expect("write manifest");
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("json"),
+        )
+        .expect("write manifest");
 
         let id_map_path = root.join("id_map.json");
         fs::write(&id_map_path, id_map_json).expect("write id map");

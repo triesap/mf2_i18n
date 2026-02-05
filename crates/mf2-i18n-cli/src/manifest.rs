@@ -65,7 +65,7 @@ pub fn sha256_raw(bytes: &[u8]) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use super::{sha256_hex, Manifest, PackEntry};
+    use super::{Manifest, PackEntry, sha256_hex};
     use std::collections::BTreeMap;
 
     #[test]

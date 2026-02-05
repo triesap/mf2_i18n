@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::artifacts::{write_catalog, write_id_map, write_id_map_hash};
 use crate::config::load_config_or_default;
-use crate::extract_pipeline::{extract_from_sources, ExtractPipelineError};
+use crate::extract_pipeline::{ExtractPipelineError, extract_from_sources};
 
 #[derive(Debug, Error)]
 pub enum ExtractCommandError {
@@ -60,7 +60,7 @@ fn resolve_path(config_path: &Path, value: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_extract, ExtractOptions};
+    use super::{ExtractOptions, run_extract};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

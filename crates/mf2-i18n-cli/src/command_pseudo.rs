@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::config::load_config_or_default;
 use crate::error::CliError;
-use crate::locale_sources::{load_locales, LocaleSourceError};
+use crate::locale_sources::{LocaleSourceError, load_locales};
 
 #[derive(Debug, Error)]
 pub enum PseudoCommandError {
@@ -137,7 +137,7 @@ fn pseudo_char(ch: char) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{pseudolocalize_message, run_pseudo, PseudoOptions};
+    use super::{PseudoOptions, pseudolocalize_message, run_pseudo};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::catalog::{Catalog, CatalogFeatures, CatalogMessage};
 use crate::extract::ExtractedMessage;
-use crate::id_map::{build_id_map, IdMap, IdMapError};
+use crate::id_map::{IdMap, IdMapError, build_id_map};
 
 #[derive(Debug, Error)]
 pub enum CatalogBuildError {
@@ -63,19 +63,9 @@ pub fn build_catalog(
 mod tests {
     use crate::extract::ExtractedMessage;
     use crate::id_map::derive_message_id;
-    use crate::lexer::Span;
     use crate::model::{ArgSpec, ArgType};
 
     use super::build_catalog;
-
-    fn span() -> Span {
-        Span {
-            start: 0,
-            end: 0,
-            line: 1,
-            column: 1,
-        }
-    }
 
     #[test]
     fn builds_catalog_with_ids() {
@@ -86,17 +76,10 @@ mod tests {
                 arg_type: ArgType::String,
                 required: true,
             }],
-            span: span(),
         }];
         let salt = b"project-salt";
-        let output = build_catalog(
-            &messages,
-            "demo",
-            "en",
-            "2026-02-01T00:00:00Z",
-            salt,
-        )
-        .expect("build");
+        let output =
+            build_catalog(&messages, "demo", "en", "2026-02-01T00:00:00Z", salt).expect("build");
 
         let expected = derive_message_id("home.title", salt);
         assert_eq!(output.catalog.messages[0].id, u32::from(expected));

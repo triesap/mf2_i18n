@@ -40,7 +40,7 @@ pub fn load_config_or_default(path: &Path) -> Result<CliConfig, CliError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config_or_default, CliConfig};
+    use super::{CliConfig, load_config_or_default};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

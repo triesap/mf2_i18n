@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+use ed25519_dalek::{Signer, SigningKey};
 use thiserror::Error;
 
 use crate::manifest::{Manifest, ManifestSigning};
@@ -16,8 +16,6 @@ pub enum SignCommandError {
     InvalidKey,
     #[error("invalid key length {0}")]
     InvalidKeyLength(usize),
-    #[error("signature verification failed")]
-    SignatureFailed,
 }
 
 #[derive(Debug, Clone)]
@@ -36,10 +34,7 @@ pub fn run_sign(options: &SignOptions) -> Result<(), SignCommandError> {
     let signature = sign_manifest(&manifest, &signing_key, &options.key_id);
     manifest.signing = Some(signature);
 
-    let out_path = options
-        .out_path
-        .as_ref()
-        .unwrap_or(&options.manifest_path);
+    let out_path = options.out_path.as_ref().unwrap_or(&options.manifest_path);
     let json = serde_json::to_string_pretty(&manifest)?;
     fs::write(out_path, json)?;
     Ok(())
@@ -68,20 +63,9 @@ fn load_signing_key(path: &Path) -> Result<SigningKey, SignCommandError> {
     Ok(SigningKey::from_bytes(&key_bytes))
 }
 
-fn verify_manifest_signature(
-    manifest: &Manifest,
-    signature: &Signature,
-    verifying_key: &VerifyingKey,
-) -> Result<(), SignCommandError> {
-    let bytes = manifest.to_signing_bytes();
-    verifying_key
-        .verify_strict(&bytes, signature)
-        .map_err(|_| SignCommandError::SignatureFailed)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{load_signing_key, sign_manifest, verify_manifest_signature, SignOptions};
+    use super::{SignOptions, load_signing_key, sign_manifest};
     use crate::command_sign::run_sign;
     use crate::manifest::{Manifest, PackEntry};
     use ed25519_dalek::SigningKey;
@@ -132,8 +116,11 @@ mod tests {
     #[test]
     fn loads_signing_key_from_hex() {
         let path = temp_path("key");
-        fs::write(&path, "hex:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-            .expect("write");
+        fs::write(
+            &path,
+            "hex:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        )
+        .expect("write");
         let key = load_signing_key(&path).expect("key");
         let bytes = key.to_bytes();
         assert_eq!(bytes[0], 0);
@@ -146,9 +133,12 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
         let manifest = sample_manifest();
         let signing = sign_manifest(&manifest, &signing_key, "demo");
-        let signature_bytes = hex::decode(signing.manifest_sig.trim_start_matches("hex:")).expect("hex");
+        let signature_bytes =
+            hex::decode(signing.manifest_sig.trim_start_matches("hex:")).expect("hex");
         let signature = ed25519_dalek::Signature::from_slice(&signature_bytes).expect("sig");
-        verify_manifest_signature(&manifest, &signature, &verifying_key).expect("verify");
+        verifying_key
+            .verify_strict(&manifest.to_signing_bytes(), &signature)
+            .expect("verify");
     }
 
     #[test]
@@ -158,8 +148,11 @@ mod tests {
         let out_path = temp_path("manifest_out");
 
         let manifest = sample_manifest();
-        fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).expect("json"))
-            .expect("write");
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("json"),
+        )
+        .expect("write");
         fs::write(&key_path, hex::encode([3u8; 32])).expect("write");
 
         let options = SignOptions {

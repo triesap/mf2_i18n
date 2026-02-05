@@ -150,7 +150,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use super::{parse_pack_header, parse_section_directory, PackKind, SectionEntry, PACK_MAGIC};
+    use super::{PACK_MAGIC, PackKind, SectionEntry, parse_pack_header, parse_section_directory};
 
     fn build_header(kind: u8) -> Vec<u8> {
         let mut bytes = Vec::new();

@@ -6,7 +6,6 @@ use thiserror::Error;
 pub struct ExtractedMessage {
     pub key: String,
     pub args: Vec<ArgSpec>,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone, Error)]
@@ -234,7 +233,12 @@ impl<'a> Scanner<'a> {
                 let name = self.parse_ident()?;
                 self.skip_ws();
                 if self.peek() != Some(b':') {
-                    return Err(self.error("expected ':' after argument name", start, line, column));
+                    return Err(self.error(
+                        "expected ':' after argument name",
+                        start,
+                        line,
+                        column,
+                    ));
                 }
                 self.bump();
                 self.skip_ws();
@@ -256,7 +260,7 @@ impl<'a> Scanner<'a> {
                             start,
                             line,
                             column,
-                        ))
+                        ));
                     }
                 }
             }
@@ -266,8 +270,7 @@ impl<'a> Scanner<'a> {
             return Err(self.error("expected ')' to close t! macro", start, line, column));
         }
         self.bump();
-        let span = self.span(start, self.index, line, column);
-        Ok(ExtractedMessage { key, args, span })
+        Ok(ExtractedMessage { key, args })
     }
 
     fn parse_string_value(&mut self) -> Result<String, ExtractError> {
@@ -297,7 +300,9 @@ impl<'a> Scanner<'a> {
         let start = self.index;
         let line = self.line;
         let column = self.column;
-        let first = self.peek().ok_or_else(|| self.error("unexpected eof", start, line, column))?;
+        let first = self
+            .peek()
+            .ok_or_else(|| self.error("unexpected eof", start, line, column))?;
         if !is_ident_start(first) {
             return Err(self.error("expected identifier", start, line, column));
         }

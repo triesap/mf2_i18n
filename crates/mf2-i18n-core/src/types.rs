@@ -67,8 +67,8 @@ impl From<MessageId> for u32 {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
     use super::{Key, MessageId};
+    use alloc::string::ToString;
 
     #[test]
     fn key_rejects_empty() {

@@ -58,11 +58,7 @@ mod tests {
     #[test]
     fn loads_micro_locale_map() {
         let path = temp_path();
-        fs::write(
-            &path,
-            "[[locale]]\ntag = \"en-x-test\"\nparent = \"en\"\n",
-        )
-        .expect("write");
+        fs::write(&path, "[[locale]]\ntag = \"en-x-test\"\nparent = \"en\"\n").expect("write");
         let map = load_micro_locales(&path).expect("load");
         assert_eq!(map.get("en-x-test"), Some(&"en".to_string()));
         fs::remove_file(&path).ok();

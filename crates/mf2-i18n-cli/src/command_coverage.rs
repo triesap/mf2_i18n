@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::catalog_reader::{load_catalog, CatalogReadError};
+use crate::catalog_reader::{CatalogReadError, load_catalog};
 use crate::config::load_config_or_default;
 use crate::error::CliError;
-use crate::locale_sources::{load_locales, LocaleSourceError};
+use crate::locale_sources::{LocaleSourceError, load_locales};
 
 #[derive(Debug, Error)]
 pub enum CoverageCommandError {
@@ -114,7 +114,7 @@ pub fn run_coverage(options: &CoverageOptions) -> Result<(), CoverageCommandErro
 
 #[cfg(test)]
 mod tests {
-    use super::{run_coverage, CoverageOptions};
+    use super::{CoverageOptions, run_coverage};
     use crate::catalog::{Catalog, CatalogFeatures, CatalogMessage};
     use crate::model::{ArgSpec, ArgType};
     use std::fs;
@@ -164,11 +164,17 @@ mod tests {
             }],
         };
         let catalog_path = root.join("catalog.json");
-        fs::write(&catalog_path, serde_json::to_string_pretty(&catalog).expect("json"))
-            .expect("write catalog");
+        fs::write(
+            &catalog_path,
+            serde_json::to_string_pretty(&catalog).expect("json"),
+        )
+        .expect("write catalog");
         let hash_path = root.join("id_map_hash");
-        fs::write(&hash_path, "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-            .expect("write hash");
+        fs::write(
+            &hash_path,
+            "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        )
+        .expect("write hash");
 
         let out_path = root.join("coverage.json");
         let options = CoverageOptions {

@@ -397,7 +397,11 @@ mod tests {
         let input = "{ =0 {zero} }";
         let tokens = Lexer::new(input).lex_all().expect("lex");
         assert!(tokens.iter().any(|token| token.kind == TokenKind::Equals));
-        assert!(tokens.iter().any(|token| matches!(token.kind, TokenKind::Number(_))));
+        assert!(
+            tokens
+                .iter()
+                .any(|token| matches!(token.kind, TokenKind::Number(_)))
+        );
     }
 
     #[test]
@@ -405,6 +409,10 @@ mod tests {
         let input = "{ $value :number }";
         let tokens = Lexer::new(input).lex_all().expect("lex");
         assert!(tokens.iter().any(|token| token.kind == TokenKind::Colon));
-        assert!(tokens.iter().any(|token| matches!(token.kind, TokenKind::Ident(_))));
+        assert!(
+            tokens
+                .iter()
+                .any(|token| matches!(token.kind, TokenKind::Ident(_)))
+        );
     }
 }

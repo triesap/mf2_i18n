@@ -38,7 +38,9 @@ fn negotiate_lookup_internal(
     with_trace: bool,
 ) -> NegotiationResult {
     let mut trace = if with_trace {
-        Some(NegotiationTrace { attempts: Vec::new() })
+        Some(NegotiationTrace {
+            attempts: Vec::new(),
+        })
     } else {
         None
     };

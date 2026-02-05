@@ -24,8 +24,8 @@ impl std::error::Error for CoreError {}
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
     use super::CoreError;
+    use alloc::string::ToString;
 
     #[test]
     fn display_formats_unsupported() {

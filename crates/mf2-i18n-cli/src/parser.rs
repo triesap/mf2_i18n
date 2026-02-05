@@ -135,7 +135,10 @@ impl Parser {
             if formatter.as_deref() == Some("plural") {
                 kind = SelectKind::Plural;
             }
-            if cases.iter().any(|case| matches!(case.key, CaseKey::Exact(_))) {
+            if cases
+                .iter()
+                .any(|case| matches!(case.key, CaseKey::Exact(_)))
+            {
                 kind = SelectKind::Plural;
             }
             Ok(Expr::Select(SelectExpr {
@@ -211,12 +214,17 @@ impl Parser {
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
-        let token = self.next().ok_or_else(|| self.error("unexpected eof", Span {
-            start: 0,
-            end: 0,
-            line: 1,
-            column: 1,
-        }))?;
+        let token = self.next().ok_or_else(|| {
+            self.error(
+                "unexpected eof",
+                Span {
+                    start: 0,
+                    end: 0,
+                    line: 1,
+                    column: 1,
+                },
+            )
+        })?;
         if token.kind == kind {
             Ok(token)
         } else {
@@ -225,12 +233,17 @@ impl Parser {
     }
 
     fn expect_ident(&mut self) -> Result<String, ParseError> {
-        let token = self.next().ok_or_else(|| self.error("unexpected eof", Span {
-            start: 0,
-            end: 0,
-            line: 1,
-            column: 1,
-        }))?;
+        let token = self.next().ok_or_else(|| {
+            self.error(
+                "unexpected eof",
+                Span {
+                    start: 0,
+                    end: 0,
+                    line: 1,
+                    column: 1,
+                },
+            )
+        })?;
         match token.kind {
             TokenKind::Ident(value) => Ok(value),
             _ => Err(self.error("expected identifier", token.span)),
@@ -238,12 +251,17 @@ impl Parser {
     }
 
     fn expect_number(&mut self) -> Result<String, ParseError> {
-        let token = self.next().ok_or_else(|| self.error("unexpected eof", Span {
-            start: 0,
-            end: 0,
-            line: 1,
-            column: 1,
-        }))?;
+        let token = self.next().ok_or_else(|| {
+            self.error(
+                "unexpected eof",
+                Span {
+                    start: 0,
+                    end: 0,
+                    line: 1,
+                    column: 1,
+                },
+            )
+        })?;
         match token.kind {
             TokenKind::Number(value) => Ok(value),
             _ => Err(self.error("expected number", token.span)),
@@ -263,7 +281,9 @@ impl Parser {
     }
 
     fn peek_is(&self, kind: &TokenKind) -> bool {
-        self.peek().map(|token| &token.kind == kind).unwrap_or(false)
+        self.peek()
+            .map(|token| &token.kind == kind)
+            .unwrap_or(false)
     }
 
     fn peek_span(&self) -> Option<Span> {
@@ -289,7 +309,7 @@ fn span_merge(start: Span, end: Span) -> Span {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_message, CaseKey, Expr, Segment, SelectKind};
+    use super::{CaseKey, Expr, Segment, SelectKind, parse_message};
 
     #[test]
     fn parses_variable_expression() {

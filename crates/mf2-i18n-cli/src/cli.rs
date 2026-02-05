@@ -2,12 +2,12 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::command_build::{run_build, BuildCommandError, BuildOptions};
-use crate::command_extract::{run_extract, ExtractCommandError, ExtractOptions};
-use crate::command_sign::{run_sign, SignCommandError, SignOptions};
-use crate::command_pseudo::{run_pseudo, PseudoCommandError, PseudoOptions};
-use crate::command_coverage::{run_coverage, CoverageCommandError, CoverageOptions};
-use crate::command_validate::{run_validate, ValidateCommandError, ValidateOptions};
+use crate::command_build::{BuildCommandError, BuildOptions, run_build};
+use crate::command_coverage::{CoverageCommandError, CoverageOptions, run_coverage};
+use crate::command_extract::{ExtractCommandError, ExtractOptions, run_extract};
+use crate::command_pseudo::{PseudoCommandError, PseudoOptions, run_pseudo};
+use crate::command_sign::{SignCommandError, SignOptions, run_sign};
+use crate::command_validate::{ValidateCommandError, ValidateOptions, run_validate};
 
 #[derive(Debug, Error)]
 pub enum CliAppError {
@@ -29,9 +29,7 @@ pub enum CliAppError {
 
 pub fn run() -> Result<(), CliAppError> {
     let mut args = std::env::args().skip(1);
-    let command = args
-        .next()
-        .ok_or_else(|| CliAppError::Usage(usage()))?;
+    let command = args.next().ok_or_else(|| CliAppError::Usage(usage()))?;
     match command.as_str() {
         "extract" => {
             let options = parse_extract_options(args.collect())?;
@@ -181,7 +179,9 @@ fn parse_sign_options(args: Vec<String>) -> Result<SignOptions, CliAppError> {
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--manifest" => manifest_path = Some(PathBuf::from(next_value("--manifest", &mut iter)?)),
+            "--manifest" => {
+                manifest_path = Some(PathBuf::from(next_value("--manifest", &mut iter)?))
+            }
             "--key" => key_path = Some(PathBuf::from(next_value("--key", &mut iter)?)),
             "--key-id" => key_id = Some(next_value("--key-id", &mut iter)?),
             "--out" => out_path = Some(PathBuf::from(next_value("--out", &mut iter)?)),
@@ -256,7 +256,10 @@ fn parse_coverage_options(args: Vec<String>) -> Result<CoverageOptions, CliAppEr
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_build_options, parse_coverage_options, parse_extract_options, parse_pseudo_options, parse_sign_options, parse_validate_options};
+    use super::{
+        parse_build_options, parse_coverage_options, parse_extract_options, parse_pseudo_options,
+        parse_sign_options, parse_validate_options,
+    };
 
     #[test]
     fn parses_extract_options() {

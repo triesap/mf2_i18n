@@ -53,7 +53,12 @@ pub fn parse_mf2_source(input: &str) -> Result<Vec<SourceEntry>, SourceError> {
             current_value.push_str(value_part.trim_start());
             current_line = line_no;
         } else if trimmed.is_empty() {
-            flush_entry(&mut entries, &mut current_key, &mut current_value, current_line);
+            flush_entry(
+                &mut entries,
+                &mut current_key,
+                &mut current_value,
+                current_line,
+            );
         } else {
             if !current_value.is_empty() {
                 current_value.push('\n');
@@ -63,7 +68,12 @@ pub fn parse_mf2_source(input: &str) -> Result<Vec<SourceEntry>, SourceError> {
     }
 
     if current_key.is_some() {
-        flush_entry(&mut entries, &mut current_key, &mut current_value, current_line);
+        flush_entry(
+            &mut entries,
+            &mut current_key,
+            &mut current_value,
+            current_line,
+        );
     }
 
     Ok(entries)
@@ -87,7 +97,11 @@ fn flush_entry(
 
 fn is_valid_key(key: &str) -> bool {
     key.bytes().all(|byte| {
-        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'.' || byte == b'_' || byte == b'-'
+        byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || byte == b'.'
+            || byte == b'_'
+            || byte == b'-'
     })
 }
 

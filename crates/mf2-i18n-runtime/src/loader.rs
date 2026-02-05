@@ -33,8 +33,9 @@ mod tests {
 
     #[test]
     fn parses_prefixed_hash() {
-        let bytes = parse_sha256("sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-            .expect("hash");
+        let bytes =
+            parse_sha256("sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+                .expect("hash");
         assert_eq!(bytes[0], 0);
     }
 }
