@@ -25,8 +25,8 @@ serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "1.0"
 toml = "0.8"
-mf2-i18n-core = { path = "crates/mf2-i18n-core" }
-mf2-i18n-runtime = { path = "crates/mf2-i18n-runtime" }
+mf2-i18n-core = { version = "0.1.0", path = "crates/mf2-i18n-core" }
+mf2-i18n-runtime = { version = "0.1.0", path = "crates/mf2-i18n-runtime" }
 
 [profile.release]
 codegen-units = 1
