@@ -16,6 +16,10 @@ pub fn load_id_map(path: &Path) -> RuntimeResult<IdMap> {
 }
 
 pub fn parse_sha256(value: &str) -> RuntimeResult<[u8; 32]> {
+    parse_sha256_literal(value)
+}
+
+pub fn parse_sha256_literal(value: &str) -> RuntimeResult<[u8; 32]> {
     let trimmed = value.trim();
     let hex = trimmed.strip_prefix("sha256:").unwrap_or(trimmed);
     let bytes = hex::decode(hex).map_err(|_| RuntimeError::InvalidHash)?;
@@ -29,7 +33,8 @@ pub fn parse_sha256(value: &str) -> RuntimeResult<[u8; 32]> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_sha256;
+    use super::{parse_sha256, parse_sha256_literal};
+    use crate::RuntimeError;
 
     #[test]
     fn parses_prefixed_hash() {
@@ -37,5 +42,19 @@ mod tests {
             parse_sha256("sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
                 .expect("hash");
         assert_eq!(bytes[0], 0);
+    }
+
+    #[test]
+    fn parses_unprefixed_hash() {
+        let bytes =
+            parse_sha256_literal("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+                .expect("hash");
+        assert_eq!(bytes[0], 0);
+    }
+
+    #[test]
+    fn rejects_invalid_hash_length() {
+        let err = parse_sha256_literal("sha256:00").expect_err("invalid hash");
+        assert!(matches!(err, RuntimeError::InvalidHash));
     }
 }
