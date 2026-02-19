@@ -134,6 +134,10 @@ impl Runtime {
         self.format_with_backend(locale, key, args, &backend)
     }
 
+    pub fn default_locale(&self) -> &str {
+        self.default_locale.normalized()
+    }
+
     pub fn format_with_backend(
         &self,
         locale: &str,
@@ -346,6 +350,7 @@ mod tests {
         fs::write(&id_map_path, id_map_json).expect("write id map");
 
         let runtime = Runtime::load_from_paths(&manifest_path, &id_map_path).expect("runtime");
+        assert_eq!(runtime.default_locale(), "en");
         let args = Args::new();
         let output = runtime.format("en", "home.title", &args).expect("format");
         assert_eq!(output, "hi");
