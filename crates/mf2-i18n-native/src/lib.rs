@@ -2,6 +2,7 @@
 
 mod error;
 mod localizer;
+mod macros;
 
 pub use crate::error::{NativeError, NativeResult};
 pub use crate::localizer::{NativeLocalizer, NativeRuntime};
