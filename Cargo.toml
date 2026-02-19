@@ -27,6 +27,7 @@ thiserror = "1.0"
 toml = "0.8"
 mf2-i18n-core = { version = "0.1.0", path = "crates/mf2-i18n-core" }
 mf2-i18n-runtime = { version = "0.1.0", path = "crates/mf2-i18n-runtime" }
+mf2-i18n-embedded = { version = "0.1.0", path = "crates/mf2-i18n-embedded" }
 
 [profile.release]
 codegen-units = 1
