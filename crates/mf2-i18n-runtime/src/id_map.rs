@@ -20,8 +20,21 @@ impl IdMap {
         Ok(Self { entries })
     }
 
+    pub fn from_bytes(contents: &[u8]) -> RuntimeResult<Self> {
+        let map: BTreeMap<String, u32> = serde_json::from_slice(contents)?;
+        let mut entries = BTreeMap::new();
+        for (key, id) in map {
+            entries.insert(key, MessageId::new(id));
+        }
+        Ok(Self { entries })
+    }
+
     pub fn get(&self, key: &str) -> Option<MessageId> {
         self.entries.get(key).copied()
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = (&str, MessageId)> {
+        self.entries.iter().map(|(key, id)| (key.as_str(), *id))
     }
 
     pub fn hash(&self) -> RuntimeResult<[u8; 32]> {
@@ -42,6 +55,7 @@ impl IdMap {
 #[cfg(test)]
 mod tests {
     use super::IdMap;
+    use mf2_i18n_core::MessageId;
 
     #[test]
     fn parses_id_map_json() {
@@ -49,5 +63,21 @@ mod tests {
         let map = IdMap::from_json(json).expect("map");
         let id = map.get("home.title").expect("id");
         assert_eq!(u32::from(id), 7);
+    }
+
+    #[test]
+    fn parses_id_map_bytes() {
+        let bytes = br#"{"home.title": 9}"#;
+        let map = IdMap::from_bytes(bytes).expect("map");
+        let id = map.get("home.title").expect("id");
+        assert_eq!(u32::from(id), 9);
+    }
+
+    #[test]
+    fn iterates_entries() {
+        let json = r#"{"home.title": 7, "home.subtitle": 11}"#;
+        let map = IdMap::from_json(json).expect("map");
+        let entries: Vec<(&str, MessageId)> = map.entries().collect();
+        assert_eq!(entries.len(), 2);
     }
 }
