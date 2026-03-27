@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use core::fmt;
 
 use crate::{CoreError, CoreResult};
 
@@ -35,10 +36,35 @@ pub enum Value {
     Str(String),
     Num(f64),
     Bool(bool),
-    DateTime(i64),
+    DateTime(DateTimeValue),
     Unit { value: f64, unit_id: u32 },
     Currency { value: f64, code: [u8; 3] },
     Any(Box<dyn core::any::Any>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DateTimeValue {
+    UnixSeconds(i64),
+    UnixMilliseconds(i64),
+}
+
+impl DateTimeValue {
+    pub const fn unix_seconds(value: i64) -> Self {
+        Self::UnixSeconds(value)
+    }
+
+    pub const fn unix_milliseconds(value: i64) -> Self {
+        Self::UnixMilliseconds(value)
+    }
+}
+
+impl fmt::Display for DateTimeValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnixSeconds(value) => write!(formatter, "unix-seconds:{value}"),
+            Self::UnixMilliseconds(value) => write!(formatter, "unix-milliseconds:{value}"),
+        }
+    }
 }
 
 pub struct Args {
@@ -84,9 +110,9 @@ impl Default for Args {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::String;
+    use alloc::string::{String, ToString};
 
-    use super::{ArgType, Args, Value};
+    use super::{ArgType, Args, DateTimeValue, Value};
 
     #[test]
     fn args_insert_and_get() {
@@ -124,6 +150,18 @@ mod tests {
         assert_eq!(
             err,
             crate::CoreError::InvalidInput("argument type mismatch")
+        );
+    }
+
+    #[test]
+    fn datetime_value_display_includes_representation() {
+        assert_eq!(
+            DateTimeValue::unix_seconds(994550400).to_string(),
+            "unix-seconds:994550400"
+        );
+        assert_eq!(
+            DateTimeValue::unix_milliseconds(994550400000).to_string(),
+            "unix-milliseconds:994550400000"
         );
     }
 }

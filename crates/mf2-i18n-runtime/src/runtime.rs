@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mf2_i18n_core::{
-    Args, CatalogChain, FormatBackend, LanguageTag, PackCatalog, PluralCategory, execute,
-    negotiate_lookup,
+    Args, CatalogChain, DateTimeValue, FormatBackend, LanguageTag, PackCatalog, PluralCategory,
+    execute, negotiate_lookup,
 };
 use mf2_i18n_std::StdFormatBackend;
 
@@ -39,7 +39,7 @@ impl FormatBackend for BasicFormatBackend {
 
     fn format_date(
         &self,
-        value: i64,
+        value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> mf2_i18n_core::CoreResult<String> {
         Ok(value.to_string())
@@ -47,7 +47,7 @@ impl FormatBackend for BasicFormatBackend {
 
     fn format_time(
         &self,
-        value: i64,
+        value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> mf2_i18n_core::CoreResult<String> {
         Ok(value.to_string())
@@ -55,7 +55,7 @@ impl FormatBackend for BasicFormatBackend {
 
     fn format_datetime(
         &self,
-        value: i64,
+        value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> mf2_i18n_core::CoreResult<String> {
         Ok(value.to_string())
@@ -100,7 +100,7 @@ impl FormatBackend for UnsupportedFormatBackend {
 
     fn format_date(
         &self,
-        _value: i64,
+        _value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> mf2_i18n_core::CoreResult<String> {
         Err(mf2_i18n_core::CoreError::Unsupported(
@@ -110,7 +110,7 @@ impl FormatBackend for UnsupportedFormatBackend {
 
     fn format_time(
         &self,
-        _value: i64,
+        _value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> mf2_i18n_core::CoreResult<String> {
         Err(mf2_i18n_core::CoreError::Unsupported(
@@ -120,7 +120,7 @@ impl FormatBackend for UnsupportedFormatBackend {
 
     fn format_datetime(
         &self,
-        _value: i64,
+        _value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> mf2_i18n_core::CoreResult<String> {
         Err(mf2_i18n_core::CoreError::Unsupported(
@@ -288,7 +288,7 @@ mod tests {
     use mf2_i18n_build::compiler::compile_message;
     use mf2_i18n_build::pack_encode::{PackBuildInput, encode_pack};
     use mf2_i18n_build::parser::parse_message;
-    use mf2_i18n_core::{Args, MessageId, PackKind, Value};
+    use mf2_i18n_core::{Args, DateTimeValue, MessageId, PackKind, Value};
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
@@ -375,6 +375,35 @@ mod tests {
             runtime.format("en", "home.count", &other).expect("other"),
             "other"
         );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn runtime_datetime_format_is_explicit_about_seconds_and_milliseconds() {
+        let root = temp_dir();
+        let runtime = write_runtime_fixture(&root, "home.when", "{ $when:datetime }");
+
+        let mut seconds_args = Args::new();
+        seconds_args.insert(
+            "when",
+            Value::DateTime(DateTimeValue::unix_seconds(994550400)),
+        );
+
+        let mut milliseconds_args = Args::new();
+        milliseconds_args.insert(
+            "when",
+            Value::DateTime(DateTimeValue::unix_milliseconds(994550400000)),
+        );
+
+        let seconds = runtime
+            .format("en", "home.when", &seconds_args)
+            .expect("seconds");
+        let milliseconds = runtime
+            .format("en", "home.when", &milliseconds_args)
+            .expect("milliseconds");
+
+        assert_eq!(seconds, milliseconds);
 
         fs::remove_dir_all(&root).ok();
     }
