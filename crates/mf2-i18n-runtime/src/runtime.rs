@@ -349,6 +349,49 @@ mod tests {
     }
 
     #[test]
+    fn runtime_format_uses_std_backend_for_currency_formatter() {
+        let root = temp_dir();
+        let runtime = write_runtime_fixture(&root, "home.total", "{ $total:currency }");
+        let mut args = Args::new();
+        args.insert(
+            "total",
+            Value::Currency {
+                value: 12345.5,
+                code: *b"USD",
+            },
+        );
+
+        let output = runtime.format("en", "home.total", &args).expect("format");
+        assert_eq!(output, "USD 12,345.5");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn runtime_format_rejects_unit_formatter_without_label_data() {
+        let root = temp_dir();
+        let runtime = write_runtime_fixture(&root, "home.distance", "{ $distance:unit }");
+        let mut args = Args::new();
+        args.insert(
+            "distance",
+            Value::Unit {
+                value: 12.5,
+                unit_id: 7,
+            },
+        );
+
+        let err = runtime
+            .format("en", "home.distance", &args)
+            .expect_err("unit formatter should fail");
+        assert_eq!(
+            err.to_string(),
+            "core error: unsupported: unit formatting requires unit label data"
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn runtime_format_uses_basic_backend_when_requested() {
         let root = temp_dir();
         let runtime = write_runtime_fixture(&root, "home.total", "{ $count:number }");

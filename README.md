@@ -34,6 +34,8 @@ Datetime arguments use `mf2_i18n_core::DateTimeValue`, with explicit `unix_secon
 
 Formatter calls may include literal named options such as `{ $total :number style=percent minimum-fraction-digits=2 }`. The build pipeline preserves those options in compiled artifacts and passes them through to runtime format backends.
 
+`StdFormatBackend` formats currency values with locale-sensitive decimal output and ISO 4217 code display. The supported currency option surface is `display=code` or no display option. Unit formatting does not invent labels from opaque `unit_id` values; it returns an explicit unsupported error until a unit label source is available.
+
 Build outputs for generated native runtimes use `platform-bundle.json` as the stable entry point over `manifest.json`, `id-map.json`, and `.mf2pack` files. Code generators should target `mf2_i18n_build::PlatformBundle` and the bundle sidecar instead of stitching those files together ad hoc.
 
 See [docs/runtime-integration.md](docs/runtime-integration.md) for the runtime decision guide and [docs/platform-consumption.md](docs/platform-consumption.md) for generated-runtime inputs.
