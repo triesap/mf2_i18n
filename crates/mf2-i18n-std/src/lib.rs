@@ -5,8 +5,8 @@ use std::str::FromStr;
 use chrono::{TimeZone, Utc};
 use intl_pluralrules::{PluralCategory as IntlPluralCategory, PluralRuleType, PluralRules};
 use mf2_i18n_core::{
-    CoreError, CoreResult, DateTimeValue, FormatBackend, FormatterOption, LanguageTag,
-    PluralCategory,
+    CoreError, CoreResult, DateTimeValue, FormatBackend, FormatterOption, FormatterOptionValue,
+    LanguageTag, PluralCategory,
 };
 use num_format::{Grouping, Locale as NumberLocale};
 use pure_rust_locales::Locale as DateLocale;
@@ -25,6 +25,13 @@ pub struct StdFormatBackend {
     plural_rules: PluralRules,
     number_locale: NumberLocale,
     date_locale: DateLocale,
+    currency_pattern: CurrencyPattern,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CurrencyPattern {
+    PrefixCode,
+    SuffixCode,
 }
 
 impl StdFormatBackend {
@@ -34,6 +41,7 @@ impl StdFormatBackend {
             plural_rules: resolve_plural_rules(&candidates)?,
             number_locale: resolve_number_locale(&candidates),
             date_locale: resolve_date_locale(&candidates),
+            currency_pattern: resolve_currency_pattern(&candidates),
         })
     }
 
@@ -69,6 +77,14 @@ impl StdFormatBackend {
         Ok(datetime
             .format_localized(pattern, self.date_locale)
             .to_string())
+    }
+
+    fn format_currency_code(&self, code: &str, value: f64) -> String {
+        let amount = self.format_decimal(value);
+        match self.currency_pattern {
+            CurrencyPattern::PrefixCode => format!("{code} {amount}"),
+            CurrencyPattern::SuffixCode => format!("{amount} {code}"),
+        }
     }
 }
 
@@ -118,22 +134,40 @@ impl FormatBackend for StdFormatBackend {
 
     fn format_unit(
         &self,
-        value: f64,
-        unit_id: u32,
-        _options: &[FormatterOption],
+        _value: f64,
+        _unit_id: u32,
+        options: &[FormatterOption],
     ) -> CoreResult<String> {
-        Ok(format!("{} u{unit_id}", self.format_decimal(value)))
+        reject_supported_options(options, &[], "unit")?;
+        Err(CoreError::Unsupported(
+            "unit formatting requires unit label data",
+        ))
     }
 
     fn format_currency(
         &self,
         value: f64,
         code: [u8; 3],
-        _options: &[FormatterOption],
+        options: &[FormatterOption],
     ) -> CoreResult<String> {
+        reject_supported_options(options, &["display"], "currency")?;
+        let display = match option_value(options, "display") {
+            Some(FormatterOptionValue::Str(value)) => value.as_str(),
+            Some(_) => {
+                return Err(CoreError::InvalidInput(
+                    "currency display option must be a string",
+                ));
+            }
+            None => "code",
+        };
+        if display != "code" {
+            return Err(CoreError::Unsupported(
+                "currency formatting supports display=code only",
+            ));
+        }
         let code =
             core::str::from_utf8(&code).map_err(|_| CoreError::InvalidInput("currency code"))?;
-        Ok(format!("{code} {}", self.format_decimal(value)))
+        Ok(self.format_currency_code(code, value))
     }
 }
 
@@ -188,6 +222,18 @@ fn resolve_date_locale(candidates: &[String]) -> DateLocale {
     DateLocale::POSIX
 }
 
+fn resolve_currency_pattern(candidates: &[String]) -> CurrencyPattern {
+    let language = candidates
+        .first()
+        .and_then(|candidate| candidate.split(['-', '_']).next())
+        .unwrap_or("en");
+
+    match language {
+        "en" => CurrencyPattern::PrefixCode,
+        _ => CurrencyPattern::SuffixCode,
+    }
+}
+
 fn expanded_locale_names(candidates: &[String]) -> Vec<String> {
     let mut names = Vec::new();
     for candidate in candidates {
@@ -203,6 +249,33 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     if !values.iter().any(|existing| existing == &value) {
         values.push(value);
     }
+}
+
+fn option_value<'a>(options: &'a [FormatterOption], key: &str) -> Option<&'a FormatterOptionValue> {
+    options
+        .iter()
+        .find(|option| option.key == key)
+        .map(|option| &option.value)
+}
+
+fn reject_supported_options(
+    options: &[FormatterOption],
+    supported: &[&str],
+    formatter: &'static str,
+) -> CoreResult<()> {
+    for option in options {
+        if !supported
+            .iter()
+            .any(|supported_key| *supported_key == option.key)
+        {
+            return Err(CoreError::Unsupported(match formatter {
+                "currency" => "currency formatter option not supported",
+                "unit" => "unit formatter option not supported",
+                _ => "formatter option not supported",
+            }));
+        }
+    }
+    Ok(())
 }
 
 fn localize_decimal_string(raw: &str, locale: &NumberLocale) -> String {
@@ -282,7 +355,9 @@ fn parse_timestamp(value: DateTimeValue) -> CoreResult<chrono::DateTime<Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use mf2_i18n_core::{DateTimeValue, FormatBackend, PluralCategory};
+    use mf2_i18n_core::{
+        DateTimeValue, FormatBackend, FormatterOption, FormatterOptionValue, PluralCategory,
+    };
 
     use super::StdFormatBackend;
 
@@ -340,18 +415,74 @@ mod tests {
     }
 
     #[test]
-    fn formats_currency_and_unit_with_localized_numbers() {
+    fn formats_currency_with_locale_sensitive_code_placement() {
+        let english = StdFormatBackend::new("en-US").expect("backend");
         let french = StdFormatBackend::new("fr-BE").expect("backend");
 
+        assert_eq!(
+            english
+                .format_currency(12345.5, *b"USD", &[])
+                .expect("currency"),
+            "USD 12,345.5"
+        );
         assert_eq!(
             french
                 .format_currency(12345.5, *b"USD", &[])
                 .expect("currency"),
-            "USD 12\u{202f}345,5"
+            "12\u{202f}345,5 USD"
         );
+    }
+
+    #[test]
+    fn rejects_unsupported_currency_display_options() {
+        let english = StdFormatBackend::new("en-US").expect("backend");
+        let err = english
+            .format_currency(
+                12345.5,
+                *b"USD",
+                &[FormatterOption {
+                    key: "display".to_string(),
+                    value: FormatterOptionValue::Str("symbol".to_string()),
+                }],
+            )
+            .expect_err("unsupported display");
+
         assert_eq!(
-            french.format_unit(12345.5, 7, &[]).expect("unit"),
-            "12\u{202f}345,5 u7"
+            err.to_string(),
+            "unsupported: currency formatting supports display=code only"
+        );
+    }
+
+    #[test]
+    fn rejects_non_string_currency_display_options() {
+        let english = StdFormatBackend::new("en-US").expect("backend");
+        let err = english
+            .format_currency(
+                12345.5,
+                *b"USD",
+                &[FormatterOption {
+                    key: "display".to_string(),
+                    value: FormatterOptionValue::Bool(true),
+                }],
+            )
+            .expect_err("invalid display");
+
+        assert_eq!(
+            err.to_string(),
+            "invalid input: currency display option must be a string"
+        );
+    }
+
+    #[test]
+    fn unit_formatting_requires_label_data() {
+        let french = StdFormatBackend::new("fr-BE").expect("backend");
+        let err = french
+            .format_unit(12345.5, 7, &[])
+            .expect_err("unit formatting unsupported");
+
+        assert_eq!(
+            err.to_string(),
+            "unsupported: unit formatting requires unit label data"
         );
     }
 }
