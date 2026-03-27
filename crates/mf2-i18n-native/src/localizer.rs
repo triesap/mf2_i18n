@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::RwLock;
 
-use mf2_i18n_core::{Args, MessageId};
+use mf2_i18n_core::{Args, FormatBackend, LanguageTag, MessageId, negotiate_lookup};
 use mf2_i18n_embedded::{EmbeddedPack, EmbeddedRuntime};
 use mf2_i18n_runtime::{IdMap, Runtime, parse_sha256_literal};
 
@@ -16,6 +16,8 @@ pub enum NativeRuntime {
 pub struct NativeLocalizer {
     runtime: Option<NativeRuntime>,
     default_locale: String,
+    supported_locales: Vec<LanguageTag>,
+    preferred_locales: RwLock<Vec<String>>,
     active_locale: RwLock<String>,
 }
 
@@ -24,8 +26,20 @@ impl NativeLocalizer {
         Self {
             runtime: None,
             default_locale: default_locale.to_owned(),
+            supported_locales: Vec::new(),
+            preferred_locales: RwLock::new(vec![default_locale.to_owned()]),
             active_locale: RwLock::new(default_locale.to_owned()),
         }
+    }
+
+    pub fn from_embedded_artifacts_or_fallback(
+        default_locale: &str,
+        id_map_json: &[u8],
+        id_map_hash: &[u8],
+        packs: &[EmbeddedPack<'_>],
+    ) -> Self {
+        Self::from_embedded_artifacts(default_locale, id_map_json, id_map_hash, packs)
+            .unwrap_or_else(|_| Self::fallback(default_locale))
     }
 
     pub fn from_embedded_artifacts(
@@ -43,18 +57,34 @@ impl NativeLocalizer {
             packs,
             default_locale,
         )?;
+        let default_locale = runtime.default_locale().to_owned();
+        let supported_locales = runtime.supported_locales().to_vec();
         Ok(Self {
             runtime: Some(NativeRuntime::Embedded(runtime)),
-            default_locale: default_locale.to_owned(),
-            active_locale: RwLock::new(default_locale.to_owned()),
+            default_locale: default_locale.clone(),
+            supported_locales,
+            preferred_locales: RwLock::new(vec![default_locale.clone()]),
+            active_locale: RwLock::new(default_locale),
         })
+    }
+
+    pub fn from_paths_or_fallback(
+        fallback_locale: &str,
+        manifest_path: &Path,
+        id_map_path: &Path,
+    ) -> Self {
+        Self::from_paths(manifest_path, id_map_path)
+            .unwrap_or_else(|_| Self::fallback(fallback_locale))
     }
 
     pub fn from_paths(manifest_path: &Path, id_map_path: &Path) -> NativeResult<Self> {
         let runtime = Runtime::load_from_paths(manifest_path, id_map_path)?;
         let default_locale = runtime.default_locale().to_owned();
+        let supported_locales = runtime.supported_locales().to_vec();
         Ok(Self {
             runtime: Some(NativeRuntime::Filesystem(runtime)),
+            supported_locales,
+            preferred_locales: RwLock::new(vec![default_locale.clone()]),
             active_locale: RwLock::new(default_locale.clone()),
             default_locale,
         })
@@ -64,13 +94,27 @@ impl NativeLocalizer {
         self.runtime.is_some()
     }
 
-    pub fn set_locale(&self, locale: &str) {
-        if locale.is_empty() {
-            return;
+    pub fn set_preferred_locales<I, S>(&self, preferred_locales: I) -> NativeResult<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let requested = normalize_requested_locales(preferred_locales, &self.default_locale);
+        let parsed = parse_requested_locales(&requested)?;
+        let selected = self.select_locale(&parsed);
+
+        if let Ok(mut guard) = self.preferred_locales.write() {
+            *guard = requested;
         }
         if let Ok(mut guard) = self.active_locale.write() {
-            *guard = locale.to_owned();
+            *guard = selected.clone();
         }
+
+        Ok(selected)
+    }
+
+    pub fn set_locale(&self, locale: &str) -> NativeResult<String> {
+        self.set_preferred_locales([locale])
     }
 
     pub fn locale(&self) -> String {
@@ -78,6 +122,27 @@ impl NativeLocalizer {
             Ok(guard) => guard.clone(),
             Err(_) => self.default_locale.clone(),
         }
+    }
+
+    pub fn default_locale(&self) -> String {
+        self.default_locale.clone()
+    }
+
+    pub fn preferred_locales(&self) -> Vec<String> {
+        match self.preferred_locales.read() {
+            Ok(guard) => guard.clone(),
+            Err(_) => vec![self.default_locale.clone()],
+        }
+    }
+
+    pub fn supported_locales(&self) -> Vec<String> {
+        if self.supported_locales.is_empty() {
+            return vec![self.default_locale.clone()];
+        }
+        self.supported_locales
+            .iter()
+            .map(|tag| tag.normalized().to_owned())
+            .collect()
     }
 
     pub fn tr(&self, key: &str) -> String {
@@ -97,6 +162,41 @@ impl NativeLocalizer {
             None => Err(NativeError::NotInitialized),
         }
     }
+
+    pub fn format_with_backend(
+        &self,
+        key: &str,
+        args: &Args,
+        backend: &dyn FormatBackend,
+    ) -> NativeResult<String> {
+        let locale = self.locale();
+        match self.runtime.as_ref() {
+            Some(NativeRuntime::Embedded(runtime)) => {
+                Ok(runtime.format_with_backend(&locale, key, args, backend)?)
+            }
+            Some(NativeRuntime::Filesystem(runtime)) => {
+                Ok(runtime.format_with_backend(&locale, key, args, backend)?)
+            }
+            None => Err(NativeError::NotInitialized),
+        }
+    }
+
+    fn select_locale(&self, requested: &[LanguageTag]) -> String {
+        if self.supported_locales.is_empty() {
+            return requested
+                .first()
+                .map(|tag| tag.normalized().to_owned())
+                .unwrap_or_else(|| self.default_locale.clone());
+        }
+
+        let default_locale = LanguageTag::parse(&self.default_locale)
+            .ok()
+            .unwrap_or_else(|| self.supported_locales[0].clone());
+        negotiate_lookup(requested, &self.supported_locales, &default_locale)
+            .selected
+            .normalized()
+            .to_owned()
+    }
 }
 
 fn to_embedded_id_map(id_map: &IdMap) -> BTreeMap<String, MessageId> {
@@ -107,10 +207,36 @@ fn to_embedded_id_map(id_map: &IdMap) -> BTreeMap<String, MessageId> {
     out
 }
 
+fn normalize_requested_locales<I, S>(preferred_locales: I, default_locale: &str) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut requested = preferred_locales
+        .into_iter()
+        .map(|locale| locale.as_ref().trim().to_owned())
+        .filter(|locale| !locale.is_empty())
+        .collect::<Vec<_>>();
+    if requested.is_empty() {
+        requested.push(default_locale.to_owned());
+    }
+    requested
+}
+
+fn parse_requested_locales(locales: &[String]) -> NativeResult<Vec<LanguageTag>> {
+    locales
+        .iter()
+        .map(|locale| LanguageTag::parse(locale).map_err(NativeError::from))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::NativeLocalizer;
-    use mf2_i18n_core::{Args, PackKind};
+    use mf2_i18n_build::compiler::compile_message;
+    use mf2_i18n_build::pack_encode::{PackBuildInput, encode_pack};
+    use mf2_i18n_build::parser::parse_message;
+    use mf2_i18n_core::{Args, MessageId, PackKind};
     use mf2_i18n_embedded::EmbeddedPack;
     use mf2_i18n_runtime::IdMap;
     use sha2::{Digest, Sha256};
@@ -130,77 +256,19 @@ mod tests {
         path
     }
 
-    fn build_pack_bytes(id_map_hash: [u8; 32]) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"MF2PACK\0");
-        bytes.extend_from_slice(&0u16.to_le_bytes());
-        bytes.push(match PackKind::Base {
-            PackKind::Base => 0,
-            PackKind::Overlay => 1,
-            PackKind::IcuData => 2,
-        });
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        bytes.extend_from_slice(&id_map_hash);
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-
-        let mut string_pool = Vec::new();
-        string_pool.extend_from_slice(&2u32.to_le_bytes());
-        string_pool.extend_from_slice(&2u32.to_le_bytes());
-        string_pool.extend_from_slice(b"hi");
-        string_pool.extend_from_slice(&4u32.to_le_bytes());
-        string_pool.extend_from_slice(b"name");
-
-        let mut message_meta = Vec::new();
-        message_meta.extend_from_slice(&1u32.to_le_bytes());
-        message_meta.extend_from_slice(&0u32.to_le_bytes());
-        message_meta.extend_from_slice(&0u32.to_le_bytes());
-
-        let mut case_tables = Vec::new();
-        case_tables.extend_from_slice(&0u32.to_le_bytes());
-
-        let mut message_index = Vec::new();
-        message_index.extend_from_slice(&1u32.to_le_bytes());
-        message_index.extend_from_slice(&0u32.to_le_bytes());
-        message_index.extend_from_slice(&0u32.to_le_bytes());
-
-        let mut message = Vec::new();
-        message.extend_from_slice(&0u32.to_le_bytes());
-        message.extend_from_slice(&2u32.to_le_bytes());
-        message.push(0);
-        message.extend_from_slice(&0u32.to_le_bytes());
-        message.push(11);
-        let mut bytecode_blob = Vec::new();
-        bytecode_blob.extend_from_slice(&(message.len() as u32).to_le_bytes());
-        bytecode_blob.extend_from_slice(&message);
-
-        let section_count = 5u16;
-        bytes.extend_from_slice(&section_count.to_le_bytes());
-        let dir_start = bytes.len();
-        let dir_len = section_count as usize * (1 + 4 + 4);
-        bytes.resize(dir_start + dir_len, 0);
-        let mut offset = bytes.len() as u32;
-
-        let sections = vec![
-            (1u8, string_pool),
-            (2u8, message_index),
-            (3u8, bytecode_blob),
-            (4u8, case_tables),
-            (5u8, message_meta),
-        ];
-
-        for (idx, (section_type, data)) in sections.into_iter().enumerate() {
-            let entry_offset = dir_start + idx * 9;
-            bytes[entry_offset] = section_type;
-            bytes[entry_offset + 1..entry_offset + 5].copy_from_slice(&offset.to_le_bytes());
-            bytes[entry_offset + 5..entry_offset + 9]
-                .copy_from_slice(&(data.len() as u32).to_le_bytes());
-            bytes.extend_from_slice(&data);
-            offset += data.len() as u32;
-        }
-
-        bytes
+    fn build_pack_bytes(id_map_hash: [u8; 32], locale_tag: &str, source: &str) -> Vec<u8> {
+        let message = parse_message(source).expect("parse");
+        let compiled = compile_message(&message);
+        let mut messages = BTreeMap::new();
+        messages.insert(MessageId::new(0), compiled.program);
+        encode_pack(&PackBuildInput {
+            pack_kind: PackKind::Base,
+            id_map_hash,
+            locale_tag: locale_tag.to_owned(),
+            parent_tag: None,
+            build_epoch_ms: 0,
+            messages,
+        })
     }
 
     fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -214,7 +282,7 @@ mod tests {
         let id_map_json = br#"{"home.title": 0}"#;
         let id_map = IdMap::from_bytes(id_map_json).expect("id map");
         let id_map_hash = id_map.hash().expect("hash");
-        let pack_bytes = build_pack_bytes(id_map_hash);
+        let pack_bytes = build_pack_bytes(id_map_hash, "en", "hi");
         let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
         let packs = [EmbeddedPack {
             locale: "en",
@@ -230,6 +298,8 @@ mod tests {
 
         assert!(localizer.is_ready());
         assert_eq!(localizer.tr("home.title"), "hi");
+        assert_eq!(localizer.default_locale(), "en");
+        assert_eq!(localizer.supported_locales(), vec!["en".to_string()]);
     }
 
     #[test]
@@ -237,6 +307,7 @@ mod tests {
         let localizer = NativeLocalizer::fallback("en");
         assert!(!localizer.is_ready());
         assert_eq!(localizer.tr("home.title"), "home.title");
+        assert_eq!(localizer.preferred_locales(), vec!["en".to_string()]);
     }
 
     #[test]
@@ -248,7 +319,7 @@ mod tests {
         let id_map_json = r#"{"home.title": 0}"#;
         let id_map = IdMap::from_json(id_map_json).expect("id map");
         let id_map_hash = id_map.hash().expect("hash");
-        let pack_bytes = build_pack_bytes(id_map_hash);
+        let pack_bytes = build_pack_bytes(id_map_hash, "en", "hi");
         let pack_path = packs_dir.join("en.mf2pack");
         fs::write(&pack_path, &pack_bytes).expect("write pack");
 
@@ -297,5 +368,57 @@ mod tests {
         assert_eq!(output, "hi");
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn negotiates_preferred_locales_against_supported_locales() {
+        let id_map_json = br#"{"home.title": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let en_pack = build_pack_bytes(id_map_hash, "en", "hi");
+        let fr_pack = build_pack_bytes(id_map_hash, "fr", "salut");
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [
+            EmbeddedPack {
+                locale: "en",
+                bytes: &en_pack,
+            },
+            EmbeddedPack {
+                locale: "fr",
+                bytes: &fr_pack,
+            },
+        ];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+
+        let selected = localizer
+            .set_preferred_locales(["fr-CA", "en-GB"])
+            .expect("locale");
+        assert_eq!(selected, "fr");
+        assert_eq!(localizer.locale(), "fr");
+        assert_eq!(
+            localizer.preferred_locales(),
+            vec!["fr-CA".to_string(), "en-GB".to_string()]
+        );
+        assert_eq!(
+            localizer.supported_locales(),
+            vec!["en".to_string(), "fr".to_string()]
+        );
+        assert_eq!(localizer.tr("home.title"), "salut");
+    }
+
+    #[test]
+    fn fallback_localizer_tracks_requested_locale_without_runtime() {
+        let localizer = NativeLocalizer::fallback("en");
+        let selected = localizer
+            .set_preferred_locales(["fr-CA", "en-GB"])
+            .expect("locale");
+        assert_eq!(selected, "fr-CA");
+        assert_eq!(localizer.locale(), "fr-CA");
     }
 }

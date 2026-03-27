@@ -22,6 +22,10 @@ Unicode MessageFormat v2 (MF2) i18n for Rust, with a no_std core and portable ru
 
 `mf2-i18n-runtime::Runtime::format()` and `mf2-i18n-embedded::EmbeddedRuntime::format()` use `UnsupportedFormatBackend` by default. Plain text and identity output work without extra setup, while plural, number, date, time, datetime, unit, and currency formatting require `format_with_backend(...)` and a caller-provided `FormatBackend`.
 
+## Native helpers
+
+`mf2-i18n-native` owns preferred-locale negotiation and active locale selection for native clients. `NativeLocalizer::set_preferred_locales(...)` negotiates against the available locales, while `define_i18n_module!` requires an explicit `init_policy: strict` or `init_policy: fallback_to_keys` choice for embedded artifacts.
+
 ## Contributing
 
 See `CONTRIBUTING.md`.

@@ -179,6 +179,14 @@ impl EmbeddedRuntime {
         self.format_with_backend(locale, key, args, &backend)
     }
 
+    pub fn default_locale(&self) -> &str {
+        self.default_locale.normalized()
+    }
+
+    pub fn supported_locales(&self) -> &[LanguageTag] {
+        &self.supported
+    }
+
     pub fn format_with_backend(
         &self,
         locale: &str,
