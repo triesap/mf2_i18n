@@ -21,11 +21,43 @@ pub enum StdFormatError {
     MissingPluralRules(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StdFormatResolution {
+    requested_locale: String,
+    plural_locale: String,
+    number_locale: Option<String>,
+    date_locale: Option<String>,
+}
+
+impl StdFormatResolution {
+    pub fn requested_locale(&self) -> &str {
+        &self.requested_locale
+    }
+
+    pub fn plural_locale(&self) -> &str {
+        &self.plural_locale
+    }
+
+    pub fn number_locale(&self) -> Option<&str> {
+        self.number_locale.as_deref()
+    }
+
+    pub fn date_locale(&self) -> Option<&str> {
+        self.date_locale.as_deref()
+    }
+
+    pub fn uses_fallback(&self) -> bool {
+        self.plural_locale != self.requested_locale
+            || self.number_locale.as_deref() != Some(self.requested_locale.as_str())
+            || self.date_locale.as_deref() != Some(self.requested_locale.as_str())
+    }
+}
+
 pub struct StdFormatBackend {
     plural_rules: PluralRules,
-    number_locale: NumberLocale,
-    date_locale: DateLocale,
-    currency_pattern: CurrencyPattern,
+    number_locale: Option<NumberLocale>,
+    date_locale: Option<DateLocale>,
+    resolution: StdFormatResolution,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,54 +69,84 @@ enum CurrencyPattern {
 impl StdFormatBackend {
     pub fn new(locale: &str) -> Result<Self, StdFormatError> {
         let candidates = locale_candidates(locale)?;
+        let requested_locale = candidates
+            .first()
+            .cloned()
+            .unwrap_or_else(|| locale.to_string());
+        let (plural_rules, plural_locale) = resolve_plural_rules(&candidates)?;
+        let number_locale = resolve_number_locale(&candidates);
+        let date_locale = resolve_date_locale(&candidates);
         Ok(Self {
-            plural_rules: resolve_plural_rules(&candidates)?,
-            number_locale: resolve_number_locale(&candidates),
-            date_locale: resolve_date_locale(&candidates),
-            currency_pattern: resolve_currency_pattern(&candidates),
+            plural_rules,
+            number_locale: number_locale.as_ref().map(|(locale, _)| *locale),
+            date_locale: date_locale.as_ref().map(|(locale, _)| *locale),
+            resolution: StdFormatResolution {
+                requested_locale,
+                plural_locale,
+                number_locale: number_locale.map(|(_, locale)| locale),
+                date_locale: date_locale.map(|(_, locale)| locale),
+            },
         })
     }
 
-    fn format_decimal(&self, value: f64) -> String {
+    pub fn resolution(&self) -> &StdFormatResolution {
+        &self.resolution
+    }
+
+    fn number_locale(&self) -> CoreResult<&NumberLocale> {
+        self.number_locale.as_ref().ok_or(CoreError::Unsupported(
+            "number formatting data unavailable for locale",
+        ))
+    }
+
+    fn date_locale(&self) -> CoreResult<DateLocale> {
+        self.date_locale.ok_or(CoreError::Unsupported(
+            "date formatting data unavailable for locale",
+        ))
+    }
+
+    fn format_decimal(&self, value: f64) -> CoreResult<String> {
+        let number_locale = self.number_locale()?;
         if value.is_nan() {
-            return self.number_locale.nan().to_string();
+            return Ok(number_locale.nan().to_string());
         }
 
         let sign = if value.is_sign_negative() {
-            self.number_locale.minus_sign().to_string()
+            number_locale.minus_sign().to_string()
         } else {
             String::new()
         };
 
         if value.is_infinite() {
-            return format!("{sign}{}", self.number_locale.infinity());
+            return Ok(format!("{sign}{}", number_locale.infinity()));
         }
 
         let raw = value.abs().to_string();
         if let Some(index) = raw.find(|ch| ch == 'e' || ch == 'E') {
-            let mantissa = localize_decimal_string(&raw[..index], &self.number_locale);
-            return format!("{sign}{mantissa}{}", &raw[index..]);
+            let mantissa = localize_decimal_string(&raw[..index], number_locale);
+            return Ok(format!("{sign}{mantissa}{}", &raw[index..]));
         }
 
-        format!(
+        Ok(format!(
             "{sign}{}",
-            localize_decimal_string(&raw, &self.number_locale)
-        )
+            localize_decimal_string(&raw, number_locale)
+        ))
     }
 
     fn format_datetime_with(&self, value: DateTimeValue, pattern: &str) -> CoreResult<String> {
         let datetime = parse_timestamp(value)?;
-        Ok(datetime
-            .format_localized(pattern, self.date_locale)
-            .to_string())
+        let date_locale = self.date_locale()?;
+        Ok(datetime.format_localized(pattern, date_locale).to_string())
     }
 
-    fn format_currency_code(&self, code: &str, value: f64) -> String {
-        let amount = self.format_decimal(value);
-        match self.currency_pattern {
-            CurrencyPattern::PrefixCode => format!("{code} {amount}"),
-            CurrencyPattern::SuffixCode => format!("{amount} {code}"),
-        }
+    fn format_currency_code(&self, code: &str, value: f64) -> CoreResult<String> {
+        let amount = self.format_decimal(value)?;
+        Ok(
+            match resolve_currency_pattern(self.resolution.number_locale()) {
+                CurrencyPattern::PrefixCode => format!("{code} {amount}"),
+                CurrencyPattern::SuffixCode => format!("{amount} {code}"),
+            },
+        )
     }
 }
 
@@ -105,7 +167,7 @@ impl FormatBackend for StdFormatBackend {
     }
 
     fn format_number(&self, value: f64, _options: &[FormatterOption]) -> CoreResult<String> {
-        Ok(self.format_decimal(value))
+        self.format_decimal(value)
     }
 
     fn format_date(
@@ -165,9 +227,10 @@ impl FormatBackend for StdFormatBackend {
                 "currency formatting supports display=code only",
             ));
         }
+        self.number_locale()?;
         let code =
             core::str::from_utf8(&code).map_err(|_| CoreError::InvalidInput("currency code"))?;
-        Ok(self.format_currency_code(code, value))
+        self.format_currency_code(code, value)
     }
 }
 
@@ -183,15 +246,14 @@ fn locale_candidates(locale: &str) -> Result<Vec<String>, StdFormatError> {
         }
     }
 
-    push_unique(&mut candidates, String::from("en"));
     Ok(candidates)
 }
 
-fn resolve_plural_rules(candidates: &[String]) -> Result<PluralRules, StdFormatError> {
+fn resolve_plural_rules(candidates: &[String]) -> Result<(PluralRules, String), StdFormatError> {
     for candidate in candidates {
         if let Ok(identifier) = candidate.parse::<LanguageIdentifier>() {
             if let Ok(rules) = PluralRules::create(identifier, PluralRuleType::CARDINAL) {
-                return Ok(rules);
+                return Ok((rules, candidate.clone()));
             }
         }
     }
@@ -204,27 +266,30 @@ fn resolve_plural_rules(candidates: &[String]) -> Result<PluralRules, StdFormatE
     ))
 }
 
-fn resolve_number_locale(candidates: &[String]) -> NumberLocale {
-    for candidate in expanded_locale_names(candidates) {
-        if let Ok(locale) = NumberLocale::from_str(&candidate) {
-            return locale;
+fn resolve_number_locale(candidates: &[String]) -> Option<(NumberLocale, String)> {
+    for candidate in candidates {
+        for name in locale_name_variants(candidate) {
+            if let Ok(locale) = NumberLocale::from_str(&name) {
+                return Some((locale, candidate.clone()));
+            }
         }
     }
-    NumberLocale::en
+    None
 }
 
-fn resolve_date_locale(candidates: &[String]) -> DateLocale {
-    for candidate in expanded_locale_names(candidates) {
-        if let Ok(locale) = DateLocale::from_str(&candidate) {
-            return locale;
+fn resolve_date_locale(candidates: &[String]) -> Option<(DateLocale, String)> {
+    for candidate in candidates {
+        for name in locale_name_variants(candidate) {
+            if let Ok(locale) = DateLocale::from_str(&name) {
+                return Some((locale, candidate.clone()));
+            }
         }
     }
-    DateLocale::POSIX
+    None
 }
 
-fn resolve_currency_pattern(candidates: &[String]) -> CurrencyPattern {
-    let language = candidates
-        .first()
+fn resolve_currency_pattern(locale: Option<&str>) -> CurrencyPattern {
+    let language = locale
         .and_then(|candidate| candidate.split(['-', '_']).next())
         .unwrap_or("en");
 
@@ -234,13 +299,11 @@ fn resolve_currency_pattern(candidates: &[String]) -> CurrencyPattern {
     }
 }
 
-fn expanded_locale_names(candidates: &[String]) -> Vec<String> {
+fn locale_name_variants(candidate: &str) -> Vec<String> {
     let mut names = Vec::new();
-    for candidate in candidates {
-        push_unique(&mut names, candidate.clone());
-        if candidate.contains('-') {
-            push_unique(&mut names, candidate.replace('-', "_"));
-        }
+    push_unique(&mut names, candidate.to_string());
+    if candidate.contains('-') {
+        push_unique(&mut names, candidate.replace('-', "_"));
     }
     names
 }
@@ -359,7 +422,7 @@ mod tests {
         DateTimeValue, FormatBackend, FormatterOption, FormatterOptionValue, PluralCategory,
     };
 
-    use super::StdFormatBackend;
+    use super::{StdFormatBackend, StdFormatError};
 
     #[test]
     fn formats_numbers_with_locale_separators() {
@@ -387,6 +450,18 @@ mod tests {
             french.plural_category(2.0).expect("plural"),
             PluralCategory::Other
         );
+    }
+
+    #[test]
+    fn exposes_locale_resolution_without_global_fallback() {
+        let backend = StdFormatBackend::new("haw-US").expect("backend");
+        let resolution = backend.resolution();
+
+        assert_eq!(resolution.requested_locale(), "haw-US");
+        assert_eq!(resolution.plural_locale(), "haw");
+        assert_eq!(resolution.number_locale(), Some("haw"));
+        assert_eq!(resolution.date_locale(), None);
+        assert!(resolution.uses_fallback());
     }
 
     #[test]
@@ -430,6 +505,38 @@ mod tests {
                 .format_currency(12345.5, *b"USD", &[])
                 .expect("currency"),
             "12\u{202f}345,5 USD"
+        );
+    }
+
+    #[test]
+    fn number_and_date_formatting_report_missing_locale_data() {
+        let backend = StdFormatBackend::new("haw-US").expect("backend");
+        let when = DateTimeValue::unix_seconds(994550400);
+
+        assert_eq!(
+            backend.format_number(12345.5, &[]).expect("number"),
+            "12,345.5"
+        );
+        assert_eq!(
+            backend
+                .format_date(when, &[])
+                .expect_err("date")
+                .to_string(),
+            "unsupported: date formatting data unavailable for locale"
+        );
+        assert_eq!(
+            backend
+                .format_time(when, &[])
+                .expect_err("time")
+                .to_string(),
+            "unsupported: date formatting data unavailable for locale"
+        );
+        assert_eq!(
+            backend
+                .format_datetime(when, &[])
+                .expect_err("datetime")
+                .to_string(),
+            "unsupported: date formatting data unavailable for locale"
         );
     }
 
@@ -484,5 +591,14 @@ mod tests {
             err.to_string(),
             "unsupported: unit formatting requires unit label data"
         );
+    }
+
+    #[test]
+    fn unsupported_locale_requires_plural_rules() {
+        let err = match StdFormatBackend::new("zz") {
+            Ok(_) => panic!("expected missing plural rules"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, StdFormatError::MissingPluralRules(locale) if locale == "zz"));
     }
 }

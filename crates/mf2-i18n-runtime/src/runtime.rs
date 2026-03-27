@@ -392,6 +392,27 @@ mod tests {
     }
 
     #[test]
+    fn runtime_format_reports_missing_date_locale_data() {
+        let root = temp_dir();
+        let runtime = write_runtime_fixture(&root, "home.when", "{ $when:date }");
+        let mut args = Args::new();
+        args.insert(
+            "when",
+            Value::DateTime(DateTimeValue::unix_seconds(994550400)),
+        );
+
+        let err = runtime
+            .format("haw-US", "home.when", &args)
+            .expect_err("date formatter should fail");
+        assert_eq!(
+            err.to_string(),
+            "core error: unsupported: date formatting data unavailable for locale"
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn runtime_format_uses_basic_backend_when_requested() {
         let root = temp_dir();
         let runtime = write_runtime_fixture(&root, "home.total", "{ $count:number }");
@@ -443,10 +464,10 @@ mod tests {
         );
 
         let seconds = runtime
-            .format("en", "home.when", &seconds_args)
+            .format("en-US", "home.when", &seconds_args)
             .expect("seconds");
         let milliseconds = runtime
-            .format("en", "home.when", &milliseconds_args)
+            .format("en-US", "home.when", &milliseconds_args)
             .expect("milliseconds");
 
         assert_eq!(seconds, milliseconds);

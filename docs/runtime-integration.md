@@ -11,6 +11,7 @@ Use `mf2-i18n-runtime` when the host can load build artifacts from disk and eval
 - locale-sensitive formatting: `Runtime::format(...)` uses `mf2-i18n-std::StdFormatBackend` by default
 - currency semantics: locale-sensitive decimal formatting with ISO 4217 code display
 - unit semantics: explicit unsupported error until a unit label source is provided
+- locale fallback visibility: `StdFormatBackend::resolution()` reports the requested locale and the resolved plural, number, and date locales
 
 This is the direct runtime path for servers, desktop tools, and std-target applications that can keep message evaluation inside Rust.
 
@@ -50,5 +51,6 @@ The generated runtime path is responsible for consuming the same ids, locale top
 - use `StdFormatBackend` for locale-sensitive std-target formatting
 - use `BasicFormatBackend` only for simple debug-style output
 - do not treat `BasicFormatBackend` as a locale-sensitive backend
+- `StdFormatBackend` resolves data only from the requested locale chain and returns explicit unsupported errors when a formatter class has no data for that chain
 - `StdFormatBackend` supports `display=code` for currency formatting and rejects other currency display modes explicitly
 - `StdFormatBackend` does not synthesize unit labels from numeric `unit_id` values
