@@ -25,6 +25,8 @@ The build output now contains:
 
 `platform-bundle.json` is the codegen entry point. It contains the runtime manifest plus the relative `id-map.json` path. Generators should load it through `mf2_i18n_build::PlatformBundle` or `load_platform_bundle_manifest(...)` instead of reading individual files ad hoc.
 
+Bundle file references are bundle-local. `id-map.json` and pack paths must stay relative to the bundle root and must not use absolute paths or parent traversal.
+
 This keeps code generators anchored to the same message ids, locale topology, pack hashes, and pack bytes that the Rust runtime uses.
 
 ## generator guidance
