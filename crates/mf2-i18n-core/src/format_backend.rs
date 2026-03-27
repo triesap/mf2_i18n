@@ -1,7 +1,7 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 
-use crate::{CoreError, CoreResult, Value};
+use crate::{CoreError, CoreResult, DateTimeValue, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FormatterId {
@@ -40,9 +40,13 @@ pub enum PluralCategory {
 pub trait FormatBackend {
     fn plural_category(&self, value: f64) -> CoreResult<PluralCategory>;
     fn format_number(&self, value: f64, options: &[FormatterOption]) -> CoreResult<String>;
-    fn format_date(&self, value: i64, options: &[FormatterOption]) -> CoreResult<String>;
-    fn format_time(&self, value: i64, options: &[FormatterOption]) -> CoreResult<String>;
-    fn format_datetime(&self, value: i64, options: &[FormatterOption]) -> CoreResult<String>;
+    fn format_date(&self, value: DateTimeValue, options: &[FormatterOption]) -> CoreResult<String>;
+    fn format_time(&self, value: DateTimeValue, options: &[FormatterOption]) -> CoreResult<String>;
+    fn format_datetime(
+        &self,
+        value: DateTimeValue,
+        options: &[FormatterOption],
+    ) -> CoreResult<String>;
     fn format_unit(
         &self,
         value: f64,
@@ -69,15 +73,15 @@ pub fn format_value(
             _ => Err(CoreError::InvalidInput("formatter expects number")),
         },
         FormatterId::Date => match value {
-            Value::DateTime(timestamp) => backend.format_date(*timestamp, options),
+            Value::DateTime(value) => backend.format_date(*value, options),
             _ => Err(CoreError::InvalidInput("formatter expects datetime")),
         },
         FormatterId::Time => match value {
-            Value::DateTime(timestamp) => backend.format_time(*timestamp, options),
+            Value::DateTime(value) => backend.format_time(*value, options),
             _ => Err(CoreError::InvalidInput("formatter expects datetime")),
         },
         FormatterId::DateTime => match value {
-            Value::DateTime(timestamp) => backend.format_datetime(*timestamp, options),
+            Value::DateTime(value) => backend.format_datetime(*value, options),
             _ => Err(CoreError::InvalidInput("formatter expects datetime")),
         },
         FormatterId::Unit => match value {
@@ -97,7 +101,7 @@ fn format_value_default(value: &Value) -> CoreResult<String> {
         Value::Str(text) => Ok(text.clone()),
         Value::Num(number) => Ok(number.to_string()),
         Value::Bool(value) => Ok(value.to_string()),
-        Value::DateTime(timestamp) => Ok(timestamp.to_string()),
+        Value::DateTime(value) => Ok(value.to_string()),
         Value::Unit { value, unit_id } => Ok(format!("{value}:{unit_id}")),
         Value::Currency { value, code } => {
             let code =
@@ -114,7 +118,7 @@ mod tests {
     use alloc::string::String;
 
     use super::{FormatBackend, FormatterId, FormatterOption, PluralCategory, format_value};
-    use crate::Value;
+    use crate::{DateTimeValue, Value};
 
     struct TestBackend;
 
@@ -133,7 +137,7 @@ mod tests {
 
         fn format_date(
             &self,
-            value: i64,
+            value: DateTimeValue,
             _options: &[FormatterOption],
         ) -> crate::CoreResult<String> {
             Ok(format!("date:{value}"))
@@ -141,7 +145,7 @@ mod tests {
 
         fn format_time(
             &self,
-            value: i64,
+            value: DateTimeValue,
             _options: &[FormatterOption],
         ) -> crate::CoreResult<String> {
             Ok(format!("time:{value}"))
@@ -149,7 +153,7 @@ mod tests {
 
         fn format_datetime(
             &self,
-            value: i64,
+            value: DateTimeValue,
             _options: &[FormatterOption],
         ) -> crate::CoreResult<String> {
             Ok(format!("datetime:{value}"))
@@ -192,5 +196,15 @@ mod tests {
         let out =
             format_value(&backend, FormatterId::Identity, &value, &options).expect("format ok");
         assert_eq!(out, "hello");
+    }
+
+    #[test]
+    fn identity_formats_datetime_with_explicit_unit() {
+        let backend = TestBackend;
+        let options = [];
+        let value = Value::DateTime(DateTimeValue::unix_milliseconds(994550400000));
+        let out =
+            format_value(&backend, FormatterId::Identity, &value, &options).expect("format ok");
+        assert_eq!(out, "unix-milliseconds:994550400000");
     }
 }

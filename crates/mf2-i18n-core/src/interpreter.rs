@@ -242,8 +242,8 @@ mod tests {
 
     use super::execute;
     use crate::{
-        Args, BytecodeProgram, FormatBackend, FormatterId, FormatterOption, Opcode, PluralCategory,
-        Value,
+        Args, BytecodeProgram, DateTimeValue, FormatBackend, FormatterId, FormatterOption, Opcode,
+        PluralCategory, Value,
     };
 
     struct TestBackend;
@@ -263,7 +263,7 @@ mod tests {
 
         fn format_date(
             &self,
-            value: i64,
+            value: DateTimeValue,
             _options: &[FormatterOption],
         ) -> crate::CoreResult<String> {
             Ok(format!("date:{value}"))
@@ -271,7 +271,7 @@ mod tests {
 
         fn format_time(
             &self,
-            value: i64,
+            value: DateTimeValue,
             _options: &[FormatterOption],
         ) -> crate::CoreResult<String> {
             Ok(format!("time:{value}"))
@@ -279,7 +279,7 @@ mod tests {
 
         fn format_datetime(
             &self,
-            value: i64,
+            value: DateTimeValue,
             _options: &[FormatterOption],
         ) -> crate::CoreResult<String> {
             Ok(format!("datetime:{value}"))

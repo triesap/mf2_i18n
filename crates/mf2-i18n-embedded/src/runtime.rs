@@ -5,8 +5,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use mf2_i18n_core::{
-    Args, Catalog, CoreError, CoreResult, FormatBackend, LanguageTag, PackCatalog, PluralCategory,
-    execute, negotiate_lookup,
+    Args, Catalog, CoreError, CoreResult, DateTimeValue, FormatBackend, LanguageTag, PackCatalog,
+    PluralCategory, execute, negotiate_lookup,
 };
 
 pub struct EmbeddedPack<'a> {
@@ -39,7 +39,7 @@ impl FormatBackend for BasicFormatBackend {
 
     fn format_date(
         &self,
-        value: i64,
+        value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> CoreResult<String> {
         Ok(value.to_string())
@@ -47,7 +47,7 @@ impl FormatBackend for BasicFormatBackend {
 
     fn format_time(
         &self,
-        value: i64,
+        value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> CoreResult<String> {
         Ok(value.to_string())
@@ -55,7 +55,7 @@ impl FormatBackend for BasicFormatBackend {
 
     fn format_datetime(
         &self,
-        value: i64,
+        value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> CoreResult<String> {
         Ok(value.to_string())
@@ -100,7 +100,7 @@ impl FormatBackend for UnsupportedFormatBackend {
 
     fn format_date(
         &self,
-        _value: i64,
+        _value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> CoreResult<String> {
         Err(CoreError::Unsupported(
@@ -110,7 +110,7 @@ impl FormatBackend for UnsupportedFormatBackend {
 
     fn format_time(
         &self,
-        _value: i64,
+        _value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> CoreResult<String> {
         Err(CoreError::Unsupported(
@@ -120,7 +120,7 @@ impl FormatBackend for UnsupportedFormatBackend {
 
     fn format_datetime(
         &self,
-        _value: i64,
+        _value: DateTimeValue,
         _options: &[mf2_i18n_core::FormatterOption],
     ) -> CoreResult<String> {
         Err(CoreError::Unsupported(

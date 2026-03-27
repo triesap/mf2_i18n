@@ -5,7 +5,8 @@ use std::str::FromStr;
 use chrono::{TimeZone, Utc};
 use intl_pluralrules::{PluralCategory as IntlPluralCategory, PluralRuleType, PluralRules};
 use mf2_i18n_core::{
-    CoreError, CoreResult, FormatBackend, FormatterOption, LanguageTag, PluralCategory,
+    CoreError, CoreResult, DateTimeValue, FormatBackend, FormatterOption, LanguageTag,
+    PluralCategory,
 };
 use num_format::{Grouping, Locale as NumberLocale};
 use pure_rust_locales::Locale as DateLocale;
@@ -63,7 +64,7 @@ impl StdFormatBackend {
         )
     }
 
-    fn format_datetime_with(&self, value: i64, pattern: &str) -> CoreResult<String> {
+    fn format_datetime_with(&self, value: DateTimeValue, pattern: &str) -> CoreResult<String> {
         let datetime = parse_timestamp(value)?;
         Ok(datetime
             .format_localized(pattern, self.date_locale)
@@ -91,15 +92,27 @@ impl FormatBackend for StdFormatBackend {
         Ok(self.format_decimal(value))
     }
 
-    fn format_date(&self, value: i64, _options: &[FormatterOption]) -> CoreResult<String> {
+    fn format_date(
+        &self,
+        value: DateTimeValue,
+        _options: &[FormatterOption],
+    ) -> CoreResult<String> {
         self.format_datetime_with(value, "%x")
     }
 
-    fn format_time(&self, value: i64, _options: &[FormatterOption]) -> CoreResult<String> {
+    fn format_time(
+        &self,
+        value: DateTimeValue,
+        _options: &[FormatterOption],
+    ) -> CoreResult<String> {
         self.format_datetime_with(value, "%X")
     }
 
-    fn format_datetime(&self, value: i64, _options: &[FormatterOption]) -> CoreResult<String> {
+    fn format_datetime(
+        &self,
+        value: DateTimeValue,
+        _options: &[FormatterOption],
+    ) -> CoreResult<String> {
         self.format_datetime_with(value, "%c")
     }
 
@@ -259,20 +272,17 @@ fn join_groups(
     groups.join(separator)
 }
 
-fn parse_timestamp(value: i64) -> CoreResult<chrono::DateTime<Utc>> {
-    let absolute = value.unsigned_abs();
-    let datetime = if absolute >= 1_000_000_000_000 {
-        Utc.timestamp_millis_opt(value).single()
-    } else {
-        Utc.timestamp_opt(value, 0).single()
+fn parse_timestamp(value: DateTimeValue) -> CoreResult<chrono::DateTime<Utc>> {
+    let datetime = match value {
+        DateTimeValue::UnixSeconds(value) => Utc.timestamp_opt(value, 0).single(),
+        DateTimeValue::UnixMilliseconds(value) => Utc.timestamp_millis_opt(value).single(),
     };
-
     datetime.ok_or(CoreError::InvalidInput("invalid datetime value"))
 }
 
 #[cfg(test)]
 mod tests {
-    use mf2_i18n_core::{FormatBackend, PluralCategory};
+    use mf2_i18n_core::{DateTimeValue, FormatBackend, PluralCategory};
 
     use super::StdFormatBackend;
 
@@ -308,22 +318,23 @@ mod tests {
     fn formats_dates_and_times_with_locale_patterns() {
         let english = StdFormatBackend::new("en-US").expect("backend");
         let french = StdFormatBackend::new("fr-BE").expect("backend");
-        let timestamp = 994550400;
+        let seconds = DateTimeValue::unix_seconds(994550400);
+        let milliseconds = DateTimeValue::unix_milliseconds(994550400000);
 
         assert_eq!(
-            english.format_date(timestamp, &[]).expect("date"),
+            english.format_date(seconds, &[]).expect("date"),
             "07/08/2001"
         );
         assert_eq!(
-            french.format_date(timestamp, &[]).expect("date"),
+            french.format_date(milliseconds, &[]).expect("date"),
             "08/07/01"
         );
         assert_eq!(
-            english.format_time(timestamp, &[]).expect("time"),
+            english.format_time(seconds, &[]).expect("time"),
             "12:00:00 AM"
         );
         assert_eq!(
-            french.format_time(timestamp, &[]).expect("time"),
+            french.format_time(milliseconds, &[]).expect("time"),
             "00:00:00"
         );
     }

@@ -18,7 +18,7 @@ mod pack_catalog;
 mod pack_decode;
 mod types;
 
-pub use args::{ArgType, Args, Value};
+pub use args::{ArgType, Args, DateTimeValue, Value};
 pub use bytecode::{
     BytecodeProgram, CaseEntry, CaseKey, CaseTable, Opcode, PluralRuleset, StringPool,
 };
