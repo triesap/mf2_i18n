@@ -7,6 +7,8 @@ use thiserror::Error;
 
 use crate::manifest::{Manifest, PackEntry, sha256_raw};
 
+pub const PLATFORM_BUNDLE_SCHEMA: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlatformBundleManifest {
     pub schema: u32,
@@ -17,14 +19,14 @@ pub struct PlatformBundleManifest {
 impl PlatformBundleManifest {
     pub fn new(runtime_manifest: Manifest, id_map_path: impl Into<String>) -> Self {
         Self {
-            schema: 1,
+            schema: PLATFORM_BUNDLE_SCHEMA,
             runtime_manifest,
             id_map_path: id_map_path.into(),
         }
     }
 
-    pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
+    pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, PlatformBundleError> {
+        Ok(serde_json::to_vec(self)?)
     }
 }
 
@@ -50,6 +52,8 @@ pub enum PlatformBundleError {
     Io(#[from] std::io::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("unsupported platform bundle schema: {0}")]
+    UnsupportedSchema(u32),
     #[error("invalid hash format")]
     InvalidHash,
     #[error("id map hash mismatch")]
@@ -141,7 +145,7 @@ pub fn write_platform_bundle_manifest(
     path: &Path,
     manifest: &PlatformBundleManifest,
 ) -> Result<(), PlatformBundleError> {
-    fs::write(path, manifest.to_canonical_bytes())?;
+    fs::write(path, manifest.to_canonical_bytes()?)?;
     Ok(())
 }
 
@@ -149,7 +153,9 @@ pub fn load_platform_bundle_manifest(
     path: &Path,
 ) -> Result<PlatformBundleManifest, PlatformBundleError> {
     let contents = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&contents)?)
+    let manifest: PlatformBundleManifest = serde_json::from_str(&contents)?;
+    validate_platform_bundle_manifest(&manifest)?;
+    Ok(manifest)
 }
 
 pub fn derive_id_map_entries_from_catalog(
@@ -178,6 +184,15 @@ fn hash_id_map_entries(entries: &BTreeMap<String, u32>) -> Result<[u8; 32], Plat
     Ok(hasher.finalize().into())
 }
 
+fn validate_platform_bundle_manifest(
+    manifest: &PlatformBundleManifest,
+) -> Result<(), PlatformBundleError> {
+    if manifest.schema != PLATFORM_BUNDLE_SCHEMA {
+        return Err(PlatformBundleError::UnsupportedSchema(manifest.schema));
+    }
+    Ok(())
+}
+
 fn parse_sha256_literal(value: &str) -> Result<[u8; 32], PlatformBundleError> {
     let trimmed = value.trim();
     let hex = trimmed.strip_prefix("sha256:").unwrap_or(trimmed);
@@ -193,8 +208,9 @@ fn parse_sha256_literal(value: &str) -> Result<[u8; 32], PlatformBundleError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PlatformBundle, PlatformBundleManifest, derive_id_map_entries_from_catalog,
-        hash_id_map_entries, write_platform_bundle_manifest,
+        PLATFORM_BUNDLE_SCHEMA, PlatformBundle, PlatformBundleError, PlatformBundleManifest,
+        derive_id_map_entries_from_catalog, hash_id_map_entries, load_platform_bundle_manifest,
+        write_platform_bundle_manifest,
     };
     use crate::catalog::{Catalog, CatalogFeatures, CatalogMessage};
     use crate::compiler::compile_message;
@@ -306,6 +322,38 @@ mod tests {
         assert_eq!(bundle.runtime_manifest().default_locale, "en");
         assert_eq!(bundle.id_map_entries().get("home.title"), Some(&0));
         assert_eq!(bundle.pack("en").expect("pack").bytes, pack_bytes);
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rejects_unsupported_platform_bundle_schema() {
+        let root = temp_dir();
+        let bundle_manifest_path = root.join("platform-bundle.json");
+        fs::write(
+            &bundle_manifest_path,
+            format!(
+                "{{\"schema\":{},\"runtime_manifest\":{{\"schema\":1,\"release_id\":\"r1\",\"generated_at\":\"2026-02-01T00:00:00Z\",\"default_locale\":\"en\",\"supported_locales\":[\"en\"],\"id_map_hash\":\"sha256:{}\",\"mf2_packs\":{{}},\"icu_packs\":null,\"micro_locales\":null,\"budgets\":null,\"signing\":null}},\"id_map_path\":\"id-map.json\"}}",
+                PLATFORM_BUNDLE_SCHEMA + 1,
+                "00".repeat(32)
+            ),
+        )
+        .expect("write bundle");
+
+        let err = load_platform_bundle_manifest(&bundle_manifest_path).expect_err("schema error");
+        assert!(matches!(err, PlatformBundleError::UnsupportedSchema(_)));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rejects_malformed_platform_bundle_json() {
+        let root = temp_dir();
+        let bundle_manifest_path = root.join("platform-bundle.json");
+        fs::write(&bundle_manifest_path, "{").expect("write malformed bundle");
+
+        let err = load_platform_bundle_manifest(&bundle_manifest_path).expect_err("json error");
+        assert!(matches!(err, PlatformBundleError::Json(_)));
 
         fs::remove_dir_all(&root).ok();
     }
