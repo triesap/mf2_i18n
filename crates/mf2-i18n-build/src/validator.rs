@@ -23,13 +23,13 @@ fn validate_segments(segments: &[Segment], spec: &MessageSpec, diagnostics: &mut
 fn validate_var(var: &VarExpr, spec: &MessageSpec, diagnostics: &mut Vec<Diagnostic>) {
     if let Some(arg) = spec.args.iter().find(|arg| arg.name == var.name) {
         if let Some(formatter) = &var.formatter {
-            if !is_known_formatter(formatter) {
+            if !is_known_formatter(&formatter.name) {
                 diagnostics.push(Diagnostic::new("MF2E030", "unknown formatter").with_span(
                     spec.key.clone(),
                     var.span.line,
                     var.span.column,
                 ));
-            } else if !formatter_accepts_arg(formatter, &arg.arg_type) {
+            } else if !formatter_accepts_arg(&formatter.name, &arg.arg_type) {
                 diagnostics.push(
                     Diagnostic::new("MF2E021", "variable type mismatch").with_span(
                         spec.key.clone(),

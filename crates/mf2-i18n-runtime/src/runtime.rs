@@ -288,7 +288,10 @@ mod tests {
     use mf2_i18n_build::compiler::compile_message;
     use mf2_i18n_build::pack_encode::{PackBuildInput, encode_pack};
     use mf2_i18n_build::parser::parse_message;
-    use mf2_i18n_core::{Args, DateTimeValue, MessageId, PackKind, Value};
+    use mf2_i18n_core::{
+        Args, DateTimeValue, FormatBackend, FormatterOption, FormatterOptionValue, MessageId,
+        PackKind, PluralCategory, Value,
+    };
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
@@ -404,6 +407,88 @@ mod tests {
             .expect("milliseconds");
 
         assert_eq!(seconds, milliseconds);
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn runtime_format_with_backend_passes_formatter_options() {
+        struct TestBackend;
+
+        impl FormatBackend for TestBackend {
+            fn plural_category(&self, _value: f64) -> mf2_i18n_core::CoreResult<PluralCategory> {
+                Ok(PluralCategory::Other)
+            }
+
+            fn format_number(
+                &self,
+                value: f64,
+                options: &[FormatterOption],
+            ) -> mf2_i18n_core::CoreResult<String> {
+                let style = options
+                    .iter()
+                    .find(|option| option.key == "style")
+                    .and_then(|option| match &option.value {
+                        FormatterOptionValue::Str(value) => Some(value.as_str()),
+                        _ => None,
+                    })
+                    .unwrap_or("plain");
+                Ok(format!("num:{value}:{style}"))
+            }
+
+            fn format_date(
+                &self,
+                value: DateTimeValue,
+                _options: &[FormatterOption],
+            ) -> mf2_i18n_core::CoreResult<String> {
+                Ok(value.to_string())
+            }
+
+            fn format_time(
+                &self,
+                value: DateTimeValue,
+                _options: &[FormatterOption],
+            ) -> mf2_i18n_core::CoreResult<String> {
+                Ok(value.to_string())
+            }
+
+            fn format_datetime(
+                &self,
+                value: DateTimeValue,
+                _options: &[FormatterOption],
+            ) -> mf2_i18n_core::CoreResult<String> {
+                Ok(value.to_string())
+            }
+
+            fn format_unit(
+                &self,
+                value: f64,
+                unit_id: u32,
+                _options: &[FormatterOption],
+            ) -> mf2_i18n_core::CoreResult<String> {
+                Ok(format!("{value}:{unit_id}"))
+            }
+
+            fn format_currency(
+                &self,
+                value: f64,
+                code: [u8; 3],
+                _options: &[FormatterOption],
+            ) -> mf2_i18n_core::CoreResult<String> {
+                let code = core::str::from_utf8(&code).unwrap_or("???");
+                Ok(format!("{value}:{code}"))
+            }
+        }
+
+        let root = temp_dir();
+        let runtime = write_runtime_fixture(&root, "home.total", "{ $count:number style=percent }");
+        let mut args = Args::new();
+        args.insert("count", Value::Num(3.5));
+
+        let output = runtime
+            .format_with_backend("en", "home.total", &args, &TestBackend)
+            .expect("format");
+        assert_eq!(output, "num:3.5:percent");
 
         fs::remove_dir_all(&root).ok();
     }

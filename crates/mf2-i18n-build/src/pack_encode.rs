@@ -118,6 +118,7 @@ fn remap_program(
     let mut program_out = BytecodeProgram::new();
     program_out.opcodes = opcodes;
     program_out.number_pool = program.number_pool.clone();
+    program_out.formatter_options = program.formatter_options.clone();
     program_out.case_tables = Vec::new();
     program_out.string_pool = StringPool::new();
     program_out.arg_names = program.arg_names.clone();
@@ -221,6 +222,24 @@ fn encode_message(program: &BytecodeProgram) -> Vec<u8> {
     for value in &program.number_pool {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
+    bytes.extend_from_slice(&(program.formatter_options.len() as u32).to_le_bytes());
+    for option in &program.formatter_options {
+        encode_inline_string(&mut bytes, &option.key);
+        match &option.value {
+            mf2_i18n_core::FormatterOptionValue::Str(value) => {
+                bytes.push(0);
+                encode_inline_string(&mut bytes, value);
+            }
+            mf2_i18n_core::FormatterOptionValue::Num(value) => {
+                bytes.push(1);
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            mf2_i18n_core::FormatterOptionValue::Bool(value) => {
+                bytes.push(2);
+                bytes.push(u8::from(*value));
+            }
+        }
+    }
     bytes.extend_from_slice(&(program.opcodes.len() as u32).to_le_bytes());
     for opcode in &program.opcodes {
         encode_opcode(&mut bytes, *opcode);
@@ -249,10 +268,15 @@ fn encode_opcode(bytes: &mut Vec<u8>, opcode: Opcode) {
         }
         Opcode::Dup => bytes.push(5),
         Opcode::Pop => bytes.push(6),
-        Opcode::CallFmt { fid, opt_count } => {
+        Opcode::CallFmt {
+            fid,
+            opt_start,
+            opt_count,
+        } => {
             bytes.push(7);
             bytes.push(fid as u8);
-            bytes.push(opt_count);
+            bytes.extend_from_slice(&opt_start.to_le_bytes());
+            bytes.extend_from_slice(&opt_count.to_le_bytes());
         }
         Opcode::Select { aidx, table } => {
             bytes.push(8);
@@ -301,6 +325,11 @@ fn find_string(pool: &StringPool, value: &str) -> u32 {
         }
     }
     0
+}
+
+fn encode_inline_string(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(value.as_bytes());
 }
 
 fn build_pack_bytes(
