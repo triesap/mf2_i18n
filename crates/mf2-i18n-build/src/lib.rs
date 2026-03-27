@@ -19,9 +19,14 @@ pub mod micro_locales;
 pub mod model;
 pub mod pack_encode;
 pub mod parser;
+pub mod platform;
 pub mod project;
 pub mod validator;
 
 pub use crate::config::{ProjectConfig, load_project_config, load_project_config_or_default};
 pub use crate::error::BuildIoError;
+pub use crate::platform::{
+    PlatformBundle, PlatformBundleError, PlatformBundleManifest, PlatformPack,
+    load_platform_bundle_manifest, write_platform_bundle_manifest,
+};
 pub use crate::project::{ProjectError, ProjectLayout, resolve_config_relative_path};

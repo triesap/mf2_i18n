@@ -18,8 +18,15 @@ pub fn write_id_map(path: &Path, id_map: &IdMap) -> Result<(), BuildIoError> {
     for (key, id) in id_map.entries() {
         entries.insert(key.to_string(), u32::from(id));
     }
+    write_id_map_entries(path, &entries)
+}
+
+pub fn write_id_map_entries(
+    path: &Path,
+    entries: &BTreeMap<String, u32>,
+) -> Result<(), BuildIoError> {
     let file = fs::File::create(path)?;
-    serde_json::to_writer_pretty(file, &entries)?;
+    serde_json::to_writer_pretty(file, entries)?;
     Ok(())
 }
 
@@ -39,10 +46,11 @@ fn hex_encode(bytes: [u8; 32]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{write_catalog, write_id_map, write_id_map_hash};
+    use super::{write_catalog, write_id_map, write_id_map_entries, write_id_map_hash};
     use crate::catalog::{Catalog, CatalogFeatures, CatalogMessage};
     use crate::id_map::{build_id_map, derive_message_id};
     use crate::model::{ArgSpec, ArgType};
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -102,5 +110,16 @@ mod tests {
         );
         fs::remove_file(&id_path).ok();
         fs::remove_file(&hash_path).ok();
+    }
+
+    #[test]
+    fn writes_id_map_entries() {
+        let path = temp_path("id_map_entries");
+        let mut entries = BTreeMap::new();
+        entries.insert("home.title".to_string(), 7);
+        write_id_map_entries(&path, &entries).expect("write id map");
+        let contents = fs::read_to_string(&path).expect("read");
+        assert!(contents.contains("\"home.title\""));
+        fs::remove_file(&path).ok();
     }
 }
