@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -54,6 +54,10 @@ pub enum PlatformBundleError {
     Json(#[from] serde_json::Error),
     #[error("unsupported platform bundle schema: {0}")]
     UnsupportedSchema(u32),
+    #[error("platform bundle paths must be relative to the bundle root: {0}")]
+    UnsupportedAbsolutePath(String),
+    #[error("platform bundle paths must not escape the bundle root: {0}")]
+    ParentTraversal(String),
     #[error("invalid hash format")]
     InvalidHash,
     #[error("id map hash mismatch")]
@@ -79,7 +83,7 @@ impl PlatformBundle {
         bundle_root: &Path,
         manifest: PlatformBundleManifest,
     ) -> Result<Self, PlatformBundleError> {
-        let id_map_path = bundle_root.join(&manifest.id_map_path);
+        let id_map_path = resolve_bundle_path(bundle_root, &manifest.id_map_path)?;
         let id_map_json = fs::read(&id_map_path)?;
         let id_map_entries: BTreeMap<String, u32> = serde_json::from_slice(&id_map_json)?;
         let id_map_hash = hash_id_map_entries(&id_map_entries)?;
@@ -90,7 +94,7 @@ impl PlatformBundle {
 
         let mut packs = Vec::new();
         for (locale, entry) in &manifest.runtime_manifest.mf2_packs {
-            let path = bundle_root.join(&entry.url);
+            let path = resolve_bundle_path(bundle_root, &entry.url)?;
             let bytes = fs::read(&path)?;
             if bytes.len() as u64 != entry.size {
                 return Err(PlatformBundleError::PackSizeMismatch(locale.clone()));
@@ -193,6 +197,33 @@ fn validate_platform_bundle_manifest(
     Ok(())
 }
 
+fn resolve_bundle_path(bundle_root: &Path, raw_path: &str) -> Result<PathBuf, PlatformBundleError> {
+    let candidate = Path::new(raw_path);
+    if candidate.is_absolute() {
+        return Err(PlatformBundleError::UnsupportedAbsolutePath(
+            raw_path.to_owned(),
+        ));
+    }
+
+    let mut resolved = PathBuf::from(bundle_root);
+    for component in candidate.components() {
+        match component {
+            Component::Normal(part) => resolved.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(PlatformBundleError::ParentTraversal(raw_path.to_owned()));
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(PlatformBundleError::UnsupportedAbsolutePath(
+                    raw_path.to_owned(),
+                ));
+            }
+        }
+    }
+
+    Ok(resolved)
+}
+
 fn parse_sha256_literal(value: &str) -> Result<[u8; 32], PlatformBundleError> {
     let trimmed = value.trim();
     let hex = trimmed.strip_prefix("sha256:").unwrap_or(trimmed);
@@ -220,7 +251,7 @@ mod tests {
     use mf2_i18n_core::{MessageId, PackKind};
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir() -> PathBuf {
@@ -249,29 +280,7 @@ mod tests {
         })
     }
 
-    #[test]
-    fn derives_id_map_entries_from_catalog() {
-        let catalog = Catalog {
-            schema: 1,
-            project: "demo".to_string(),
-            generated_at: "2026-02-01T00:00:00Z".to_string(),
-            default_locale: "en".to_string(),
-            messages: vec![CatalogMessage {
-                key: "home.title".to_string(),
-                id: 7,
-                args: vec![],
-                features: CatalogFeatures::default(),
-                source_refs: None,
-            }],
-        };
-
-        let entries = derive_id_map_entries_from_catalog(&catalog);
-        assert_eq!(entries.get("home.title"), Some(&7));
-    }
-
-    #[test]
-    fn loads_platform_bundle_from_bundle_manifest() {
-        let root = temp_dir();
+    fn write_valid_bundle_fixture(root: &Path) -> (PathBuf, Vec<u8>) {
         let packs_dir = root.join("packs");
         fs::create_dir_all(&packs_dir).expect("packs");
 
@@ -317,6 +326,33 @@ mod tests {
         );
         let bundle_manifest_path = root.join("platform-bundle.json");
         write_platform_bundle_manifest(&bundle_manifest_path, &bundle_manifest).expect("manifest");
+        (bundle_manifest_path, pack_bytes)
+    }
+
+    #[test]
+    fn derives_id_map_entries_from_catalog() {
+        let catalog = Catalog {
+            schema: 1,
+            project: "demo".to_string(),
+            generated_at: "2026-02-01T00:00:00Z".to_string(),
+            default_locale: "en".to_string(),
+            messages: vec![CatalogMessage {
+                key: "home.title".to_string(),
+                id: 7,
+                args: vec![],
+                features: CatalogFeatures::default(),
+                source_refs: None,
+            }],
+        };
+
+        let entries = derive_id_map_entries_from_catalog(&catalog);
+        assert_eq!(entries.get("home.title"), Some(&7));
+    }
+
+    #[test]
+    fn loads_platform_bundle_from_bundle_manifest() {
+        let root = temp_dir();
+        let (bundle_manifest_path, pack_bytes) = write_valid_bundle_fixture(&root);
 
         let bundle = PlatformBundle::load(&bundle_manifest_path).expect("bundle");
         assert_eq!(bundle.runtime_manifest().default_locale, "en");
@@ -356,5 +392,115 @@ mod tests {
         assert!(matches!(err, PlatformBundleError::Json(_)));
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rejects_parent_traversal_in_id_map_path() {
+        let root = temp_dir();
+        let bundle_manifest_path = root.join("platform-bundle.json");
+        let outside_id_map_path = root.join("..").join("outside-id-map.json");
+        fs::write(&outside_id_map_path, br#"{"home.title":0}"#).expect("outside id map");
+
+        let (valid_bundle_manifest_path, _) = write_valid_bundle_fixture(&root);
+        let mut bundle_manifest =
+            load_platform_bundle_manifest(&valid_bundle_manifest_path).expect("manifest");
+        bundle_manifest.id_map_path = "../outside-id-map.json".to_string();
+        write_platform_bundle_manifest(&bundle_manifest_path, &bundle_manifest).expect("manifest");
+
+        let err = PlatformBundle::load(&bundle_manifest_path).expect_err("parent traversal");
+        assert!(matches!(err, PlatformBundleError::ParentTraversal(_)));
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_file(&outside_id_map_path).ok();
+    }
+
+    #[test]
+    fn rejects_absolute_id_map_path() {
+        let root = temp_dir();
+        let outside_id_map_path = std::env::temp_dir().join(format!(
+            "mf2_i18n_platform_abs_id_map_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        fs::write(&outside_id_map_path, br#"{"home.title":0}"#).expect("outside id map");
+
+        let (valid_bundle_manifest_path, _) = write_valid_bundle_fixture(&root);
+        let mut bundle_manifest =
+            load_platform_bundle_manifest(&valid_bundle_manifest_path).expect("manifest");
+        bundle_manifest.id_map_path = outside_id_map_path.to_string_lossy().into_owned();
+        write_platform_bundle_manifest(&valid_bundle_manifest_path, &bundle_manifest)
+            .expect("manifest");
+
+        let err = PlatformBundle::load(&valid_bundle_manifest_path).expect_err("absolute path");
+        assert!(matches!(
+            err,
+            PlatformBundleError::UnsupportedAbsolutePath(_)
+        ));
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_file(&outside_id_map_path).ok();
+    }
+
+    #[test]
+    fn rejects_parent_traversal_in_pack_path() {
+        let root = temp_dir();
+        let outside_pack_path = root.join("..").join("outside-pack.mf2pack");
+
+        let (valid_bundle_manifest_path, pack_bytes) = write_valid_bundle_fixture(&root);
+        fs::write(&outside_pack_path, &pack_bytes).expect("outside pack");
+
+        let mut bundle_manifest =
+            load_platform_bundle_manifest(&valid_bundle_manifest_path).expect("manifest");
+        bundle_manifest
+            .runtime_manifest
+            .mf2_packs
+            .get_mut("en")
+            .expect("pack entry")
+            .url = "../outside-pack.mf2pack".to_string();
+        write_platform_bundle_manifest(&valid_bundle_manifest_path, &bundle_manifest)
+            .expect("manifest");
+
+        let err = PlatformBundle::load(&valid_bundle_manifest_path).expect_err("parent traversal");
+        assert!(matches!(err, PlatformBundleError::ParentTraversal(_)));
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_file(&outside_pack_path).ok();
+    }
+
+    #[test]
+    fn rejects_absolute_pack_path() {
+        let root = temp_dir();
+        let outside_pack_path = std::env::temp_dir().join(format!(
+            "mf2_i18n_platform_abs_pack_{}.mf2pack",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+
+        let (valid_bundle_manifest_path, pack_bytes) = write_valid_bundle_fixture(&root);
+        fs::write(&outside_pack_path, &pack_bytes).expect("outside pack");
+
+        let mut bundle_manifest =
+            load_platform_bundle_manifest(&valid_bundle_manifest_path).expect("manifest");
+        bundle_manifest
+            .runtime_manifest
+            .mf2_packs
+            .get_mut("en")
+            .expect("pack entry")
+            .url = outside_pack_path.to_string_lossy().into_owned();
+        write_platform_bundle_manifest(&valid_bundle_manifest_path, &bundle_manifest)
+            .expect("manifest");
+
+        let err = PlatformBundle::load(&valid_bundle_manifest_path).expect_err("absolute path");
+        assert!(matches!(
+            err,
+            PlatformBundleError::UnsupportedAbsolutePath(_)
+        ));
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_file(&outside_pack_path).ok();
     }
 }
