@@ -4,16 +4,16 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::catalog::Catalog;
-use crate::error::CliError;
+use crate::error::BuildIoError;
 use crate::id_map::IdMap;
 
-pub fn write_catalog(path: &Path, catalog: &Catalog) -> Result<(), CliError> {
+pub fn write_catalog(path: &Path, catalog: &Catalog) -> Result<(), BuildIoError> {
     let file = fs::File::create(path)?;
     serde_json::to_writer_pretty(file, catalog)?;
     Ok(())
 }
 
-pub fn write_id_map(path: &Path, id_map: &IdMap) -> Result<(), CliError> {
+pub fn write_id_map(path: &Path, id_map: &IdMap) -> Result<(), BuildIoError> {
     let mut entries: BTreeMap<String, u32> = BTreeMap::new();
     for (key, id) in id_map.entries() {
         entries.insert(key.to_string(), u32::from(id));
@@ -23,7 +23,7 @@ pub fn write_id_map(path: &Path, id_map: &IdMap) -> Result<(), CliError> {
     Ok(())
 }
 
-pub fn write_id_map_hash(path: &Path, hash: [u8; 32]) -> Result<(), CliError> {
+pub fn write_id_map_hash(path: &Path, hash: [u8; 32]) -> Result<(), BuildIoError> {
     let mut file = fs::File::create(path)?;
     writeln!(file, "sha256:{}", hex_encode(hash))?;
     Ok(())

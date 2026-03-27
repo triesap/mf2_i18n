@@ -2,9 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use ed25519_dalek::{Signer, SigningKey};
+use mf2_i18n_build::manifest::{Manifest, ManifestSigning};
 use thiserror::Error;
-
-use crate::manifest::{Manifest, ManifestSigning};
 
 #[derive(Debug, Error)]
 pub enum SignCommandError {
@@ -67,8 +66,8 @@ fn load_signing_key(path: &Path) -> Result<SigningKey, SignCommandError> {
 mod tests {
     use super::{SignOptions, load_signing_key, sign_manifest};
     use crate::command_sign::run_sign;
-    use crate::manifest::{Manifest, PackEntry};
     use ed25519_dalek::SigningKey;
+    use mf2_i18n_build::manifest::{Manifest, PackEntry};
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;

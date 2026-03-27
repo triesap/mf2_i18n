@@ -1,17 +1,15 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use mf2_i18n_build::locale_sources::{LocaleSourceError, load_locales};
+use mf2_i18n_build::project::{ProjectError, ProjectLayout};
 use thiserror::Error;
-
-use crate::config::load_config_or_default;
-use crate::error::CliError;
-use crate::locale_sources::{LocaleSourceError, load_locales};
 
 #[derive(Debug, Error)]
 pub enum PseudoCommandError {
-    #[error("config error: {0}")]
-    Config(#[from] CliError),
+    #[error(transparent)]
+    Project(#[from] ProjectError),
     #[error(transparent)]
     Sources(#[from] LocaleSourceError),
     #[error("unknown locale {0}")]
@@ -29,17 +27,8 @@ pub struct PseudoOptions {
 }
 
 pub fn run_pseudo(options: &PseudoOptions) -> Result<(), PseudoCommandError> {
-    let config = load_config_or_default(&options.config_path)?;
-    let base_dir = options
-        .config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let roots: Vec<PathBuf> = config
-        .source_dirs
-        .iter()
-        .map(|dir| base_dir.join(dir))
-        .collect();
-    let locales = load_locales(&roots)?;
+    let project = ProjectLayout::load_or_default(&options.config_path)?;
+    let locales = load_locales(&project.source_roots())?;
     let source = locales
         .into_iter()
         .find(|bundle| bundle.locale == options.locale)

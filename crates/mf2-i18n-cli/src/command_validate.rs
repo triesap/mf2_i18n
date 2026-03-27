@@ -1,18 +1,19 @@
-use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
+use mf2_i18n_build::catalog_reader::{CatalogReadError, load_catalog};
+use mf2_i18n_build::diagnostic::Diagnostic;
+use mf2_i18n_build::locale_sources::{LocaleBundle, LocaleSourceError, load_locales};
+use mf2_i18n_build::model::MessageSpec;
+use mf2_i18n_build::parser::parse_message;
+use mf2_i18n_build::project::{ProjectError, ProjectLayout};
+use mf2_i18n_build::validator::validate_message;
 use thiserror::Error;
-
-use crate::catalog_reader::{CatalogReadError, load_catalog};
-use crate::config::load_config_or_default;
-use crate::diagnostic::Diagnostic;
-use crate::locale_sources::{LocaleBundle, LocaleSourceError, load_locales};
-use crate::parser::parse_message;
-use crate::validator::validate_message;
 
 #[derive(Debug, Error)]
 pub enum ValidateCommandError {
-    #[error("config error: {0}")]
-    Config(#[from] crate::error::CliError),
+    #[error(transparent)]
+    Project(#[from] ProjectError),
     #[error(transparent)]
     Catalog(#[from] CatalogReadError),
     #[error(transparent)]
@@ -29,14 +30,9 @@ pub struct ValidateOptions {
 }
 
 pub fn run_validate(options: &ValidateOptions) -> Result<Vec<Diagnostic>, ValidateCommandError> {
-    let config = load_config_or_default(&options.config_path)?;
+    let project = ProjectLayout::load_or_default(&options.config_path)?;
     let bundle = load_catalog(&options.catalog_path, &options.id_map_hash_path)?;
-    let roots: Vec<PathBuf> = config
-        .source_dirs
-        .iter()
-        .map(|root| resolve_path(&options.config_path, root))
-        .collect();
-    let locales = load_locales(&roots)?;
+    let locales = load_locales(&project.source_roots())?;
 
     let mut diagnostics = Vec::new();
     for locale in locales {
@@ -50,20 +46,9 @@ pub fn run_validate(options: &ValidateOptions) -> Result<Vec<Diagnostic>, Valida
     }
 }
 
-fn resolve_path(config_path: &Path, value: &str) -> PathBuf {
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        return path;
-    }
-    config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(path)
-}
-
 fn validate_locale(
     locale: &LocaleBundle,
-    specs: &std::collections::BTreeMap<String, crate::model::MessageSpec>,
+    specs: &BTreeMap<String, MessageSpec>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -114,8 +99,8 @@ fn validate_locale(
 #[cfg(test)]
 mod tests {
     use super::{ValidateOptions, run_validate};
-    use crate::catalog::{Catalog, CatalogFeatures, CatalogMessage};
-    use crate::model::{ArgSpec, ArgType};
+    use mf2_i18n_build::catalog::{Catalog, CatalogFeatures, CatalogMessage};
+    use mf2_i18n_build::model::{ArgSpec, ArgType};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

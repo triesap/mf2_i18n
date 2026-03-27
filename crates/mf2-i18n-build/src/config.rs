@@ -3,17 +3,17 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::error::CliError;
+use crate::error::BuildIoError;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct CliConfig {
+pub struct ProjectConfig {
     pub default_locale: String,
     pub source_dirs: Vec<String>,
     pub micro_locales_registry: Option<String>,
     pub project_salt_path: String,
 }
 
-impl Default for CliConfig {
+impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
             default_locale: "en".to_string(),
@@ -24,23 +24,23 @@ impl Default for CliConfig {
     }
 }
 
-pub fn load_config(path: &Path) -> Result<CliConfig, CliError> {
+pub fn load_project_config(path: &Path) -> Result<ProjectConfig, BuildIoError> {
     let contents = fs::read_to_string(path)?;
     let config = toml::from_str(&contents)?;
     Ok(config)
 }
 
-pub fn load_config_or_default(path: &Path) -> Result<CliConfig, CliError> {
+pub fn load_project_config_or_default(path: &Path) -> Result<ProjectConfig, BuildIoError> {
     if path.exists() {
-        load_config(path)
+        load_project_config(path)
     } else {
-        Ok(CliConfig::default())
+        Ok(ProjectConfig::default())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CliConfig, load_config_or_default};
+    use super::{ProjectConfig, load_project_config_or_default};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn uses_default_when_missing() {
         let path = temp_path("missing");
-        let config = load_config_or_default(&path).expect("config");
+        let config = load_project_config_or_default(&path).expect("config");
         assert_eq!(config.default_locale, "en");
     }
 
@@ -72,14 +72,14 @@ micro_locales_registry = "micro-locales.toml"
 project_salt_path = "tools/id_salt.txt"
 "#;
         fs::write(&path, contents).expect("write");
-        let config = load_config_or_default(&path).expect("config");
+        let config = load_project_config_or_default(&path).expect("config");
         assert_eq!(config.default_locale, "fr");
         fs::remove_file(&path).ok();
     }
 
     #[test]
     fn default_values_are_stable() {
-        let config = CliConfig::default();
+        let config = ProjectConfig::default();
         assert_eq!(config.project_salt_path, "tools/id_salt.txt");
     }
 }

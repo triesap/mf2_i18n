@@ -1,18 +1,20 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use mf2_i18n_build::BuildIoError;
+use mf2_i18n_build::artifacts::{write_catalog, write_id_map, write_id_map_hash};
+use mf2_i18n_build::extract_pipeline::{ExtractPipelineError, extract_from_sources};
+use mf2_i18n_build::project::{ProjectError, ProjectLayout};
 use thiserror::Error;
-
-use crate::artifacts::{write_catalog, write_id_map, write_id_map_hash};
-use crate::config::load_config_or_default;
-use crate::extract_pipeline::{ExtractPipelineError, extract_from_sources};
 
 #[derive(Debug, Error)]
 pub enum ExtractCommandError {
-    #[error("config error: {0}")]
-    Config(#[from] crate::error::CliError),
+    #[error(transparent)]
+    Project(#[from] ProjectError),
     #[error(transparent)]
     Pipeline(#[from] ExtractPipelineError),
+    #[error(transparent)]
+    BuildIo(#[from] BuildIoError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -27,15 +29,13 @@ pub struct ExtractOptions {
 }
 
 pub fn run_extract(options: &ExtractOptions) -> Result<(), ExtractCommandError> {
-    let config = load_config_or_default(&options.config_path)?;
-    let salt_path = resolve_path(&options.config_path, &config.project_salt_path);
-    let salt = fs::read_to_string(&salt_path)?;
-    let salt_bytes = salt.trim_end().as_bytes().to_vec();
+    let project = ProjectLayout::load_or_default(&options.config_path)?;
+    let salt_bytes = project.load_project_salt()?;
 
     let output = extract_from_sources(
         &options.roots,
         &options.project,
-        &config.default_locale,
+        &project.config().default_locale,
         &options.generated_at,
         &salt_bytes,
     )?;
@@ -45,17 +45,6 @@ pub fn run_extract(options: &ExtractOptions) -> Result<(), ExtractCommandError> 
     write_id_map_hash(&options.out_dir.join("id_map_hash"), output.id_map_hash)?;
     write_id_map(&options.out_dir.join("id_map.json"), &output.id_map)?;
     Ok(())
-}
-
-fn resolve_path(config_path: &Path, value: &str) -> PathBuf {
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        return path;
-    }
-    config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(path)
 }
 
 #[cfg(test)]
