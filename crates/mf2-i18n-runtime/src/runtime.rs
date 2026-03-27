@@ -6,6 +6,7 @@ use mf2_i18n_core::{
     Args, CatalogChain, FormatBackend, LanguageTag, PackCatalog, PluralCategory, execute,
     negotiate_lookup,
 };
+use mf2_i18n_std::StdFormatBackend;
 
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::id_map::IdMap;
@@ -201,7 +202,8 @@ impl Runtime {
     }
 
     pub fn format(&self, locale: &str, key: &str, args: &Args) -> RuntimeResult<String> {
-        let backend = UnsupportedFormatBackend;
+        let backend =
+            StdFormatBackend::new(locale).map_err(|err| RuntimeError::Core(err.to_string()))?;
         self.format_with_backend(locale, key, args, &backend)
     }
 
@@ -331,19 +333,14 @@ mod tests {
     }
 
     #[test]
-    fn runtime_format_requires_backend_for_number_formatter() {
+    fn runtime_format_uses_std_backend_for_number_formatter() {
         let root = temp_dir();
         let runtime = write_runtime_fixture(&root, "home.total", "{ $count:number }");
         let mut args = Args::new();
-        args.insert("count", Value::Num(3.5));
+        args.insert("count", Value::Num(12345.5));
 
-        let err = runtime
-            .format("en", "home.total", &args)
-            .expect_err("default formatter should fail");
-        assert_eq!(
-            err.to_string(),
-            "core error: unsupported: number formatting requires a format backend"
-        );
+        let output = runtime.format("en", "home.total", &args).expect("format");
+        assert_eq!(output, "12,345.5");
 
         fs::remove_dir_all(&root).ok();
     }
@@ -364,22 +361,19 @@ mod tests {
     }
 
     #[test]
-    fn runtime_plural_requires_backend_when_exact_match_is_absent() {
+    fn runtime_plural_uses_std_backend_when_exact_match_is_absent() {
         let root = temp_dir();
         let runtime = write_runtime_fixture(
             &root,
             "home.count",
             "{ $count:plural -> [one] {one} *[other] {other} }",
         );
-        let mut args = Args::new();
-        args.insert("count", Value::Num(2.0));
+        let mut other = Args::new();
+        other.insert("count", Value::Num(2.0));
 
-        let err = runtime
-            .format("en", "home.count", &args)
-            .expect_err("default plural selection should fail");
         assert_eq!(
-            err.to_string(),
-            "core error: unsupported: plural selection requires a format backend"
+            runtime.format("en", "home.count", &other).expect("other"),
+            "other"
         );
 
         fs::remove_dir_all(&root).ok();

@@ -1,5 +1,5 @@
 [package]
-name = "mf2-i18n-native"
+name = "mf2-i18n-std"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,22 +7,18 @@ authors.workspace = true
 repository.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Native runtime helpers for Unicode MessageFormat v2 (MF2) i18n."
+description = "Std-target locale formatting backend for Unicode MessageFormat v2 (MF2)."
 keywords = ["i18n", "messageformat", "localization", "unicode", "mf2"]
 categories = ["internationalization", "text-processing"]
 
 [lib]
-name = "mf2_i18n_native"
+name = "mf2_i18n_std"
 
 [dependencies]
 thiserror = { workspace = true }
 mf2-i18n-core = { workspace = true }
-mf2-i18n-runtime = { workspace = true }
-mf2-i18n-embedded = { workspace = true }
-mf2-i18n-std = { workspace = true }
-
-[dev-dependencies]
-hex = { workspace = true }
-sha2 = { workspace = true }
-serde_json = { workspace = true }
-mf2-i18n-build = { workspace = true }
+chrono = { version = "0.4.44", features = ["unstable-locales"] }
+intl_pluralrules = "7.0.2"
+num-format = "0.4.4"
+pure-rust-locales = "0.8.2"
+unic-langid = "0.9"

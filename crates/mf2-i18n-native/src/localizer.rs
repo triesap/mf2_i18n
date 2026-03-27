@@ -5,6 +5,7 @@ use std::sync::RwLock;
 use mf2_i18n_core::{Args, FormatBackend, LanguageTag, MessageId, negotiate_lookup};
 use mf2_i18n_embedded::{EmbeddedPack, EmbeddedRuntime};
 use mf2_i18n_runtime::{IdMap, Runtime, parse_sha256_literal};
+use mf2_i18n_std::StdFormatBackend;
 
 use crate::error::{NativeError, NativeResult};
 
@@ -156,11 +157,9 @@ impl NativeLocalizer {
 
     pub fn format(&self, key: &str, args: &Args) -> NativeResult<String> {
         let locale = self.locale();
-        match self.runtime.as_ref() {
-            Some(NativeRuntime::Embedded(runtime)) => Ok(runtime.format(&locale, key, args)?),
-            Some(NativeRuntime::Filesystem(runtime)) => Ok(runtime.format(&locale, key, args)?),
-            None => Err(NativeError::NotInitialized),
-        }
+        let backend =
+            StdFormatBackend::new(&locale).map_err(|err| NativeError::Core(err.to_string()))?;
+        self.format_with_backend(key, args, &backend)
     }
 
     pub fn format_with_backend(
@@ -410,6 +409,41 @@ mod tests {
             vec!["en".to_string(), "fr".to_string()]
         );
         assert_eq!(localizer.tr("home.title"), "salut");
+    }
+
+    #[test]
+    fn formats_numbers_with_default_backend() {
+        let id_map_json = br#"{"home.total": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let en_pack = build_pack_bytes(id_map_hash, "en", "{ $count:number }");
+        let fr_pack = build_pack_bytes(id_map_hash, "fr", "{ $count:number }");
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [
+            EmbeddedPack {
+                locale: "en",
+                bytes: &en_pack,
+            },
+            EmbeddedPack {
+                locale: "fr",
+                bytes: &fr_pack,
+            },
+        ];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+        localizer.set_preferred_locales(["fr-BE"]).expect("locale");
+
+        let mut args = Args::new();
+        args.insert("count", mf2_i18n_core::Value::Num(12345.5));
+        assert_eq!(
+            localizer.format("home.total", &args).expect("format"),
+            "12\u{202f}345,5"
+        );
     }
 
     #[test]

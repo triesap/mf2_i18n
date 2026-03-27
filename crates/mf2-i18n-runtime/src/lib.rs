@@ -13,3 +13,4 @@ pub use crate::loader::{load_id_map, load_manifest, parse_sha256, parse_sha256_l
 pub use crate::manifest::{Manifest, ManifestSigning, PackEntry};
 pub use crate::runtime::{BasicFormatBackend, Runtime, UnsupportedFormatBackend};
 pub use crate::signing::verify_manifest_signature;
+pub use mf2_i18n_std::StdFormatBackend;
