@@ -18,6 +18,10 @@ Unicode MessageFormat v2 (MF2) i18n for Rust, with a no_std core and portable ru
 - `mf2-i18n-build`: supported build/project API for extraction, validation, compilation, id-map generation, and pack generation.
 - `mf2-i18n-cli`: thin CLI over `mf2-i18n-build`.
 
+## Runtime backends
+
+`mf2-i18n-runtime::Runtime::format()` and `mf2-i18n-embedded::EmbeddedRuntime::format()` use `UnsupportedFormatBackend` by default. Plain text and identity output work without extra setup, while plural, number, date, time, datetime, unit, and currency formatting require `format_with_backend(...)` and a caller-provided `FormatBackend`.
+
 ## Contributing
 
 See `CONTRIBUTING.md`.

@@ -5,4 +5,6 @@ extern crate alloc;
 
 mod runtime;
 
-pub use crate::runtime::{BasicFormatBackend, EmbeddedPack, EmbeddedRuntime};
+pub use crate::runtime::{
+    BasicFormatBackend, EmbeddedPack, EmbeddedRuntime, UnsupportedFormatBackend,
+};
