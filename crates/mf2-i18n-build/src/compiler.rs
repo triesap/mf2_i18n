@@ -1,10 +1,14 @@
 use std::collections::BTreeMap;
 
 use mf2_i18n_core::{
-    BytecodeProgram, CaseEntry, CaseKey, CaseTable, FormatterId, Opcode, PluralRuleset,
+    BytecodeProgram, CaseEntry, CaseKey, CaseTable, FormatterId, FormatterOption,
+    FormatterOptionValue, Opcode, PluralRuleset,
 };
 
-use crate::parser::{CaseKey as AstCaseKey, Expr, Message, Segment, SelectKind, VarExpr};
+use crate::parser::{
+    CaseKey as AstCaseKey, Expr, FormatterOptionExpr, FormatterOptionExprValue, Message, Segment,
+    SelectKind, VarExpr,
+};
 
 pub struct CompileResult {
     pub program: BytecodeProgram,
@@ -51,10 +55,19 @@ impl Compiler {
         let aidx = self.arg_index(&var.name);
         self.program.opcodes.push(Opcode::PushArg { aidx });
         if let Some(formatter) = &var.formatter {
-            let fid = formatter_id(formatter);
-            self.program
-                .opcodes
-                .push(Opcode::CallFmt { fid, opt_count: 0 });
+            let fid = formatter_id(&formatter.name);
+            let opt_start = self.program.formatter_options.len() as u32;
+            for option in &formatter.options {
+                self.program
+                    .push_formatter_option(compile_formatter_option(option));
+            }
+            let opt_count =
+                u16::try_from(formatter.options.len()).expect("formatter option count exceeds u16");
+            self.program.opcodes.push(Opcode::CallFmt {
+                fid,
+                opt_start,
+                opt_count,
+            });
         }
         self.program.opcodes.push(Opcode::EmitStack);
     }
@@ -150,6 +163,17 @@ fn compile_case_key(program: &mut BytecodeProgram, key: &AstCaseKey, is_default:
     }
 }
 
+fn compile_formatter_option(option: &FormatterOptionExpr) -> FormatterOption {
+    FormatterOption {
+        key: option.key.clone(),
+        value: match &option.value {
+            FormatterOptionExprValue::Str(value) => FormatterOptionValue::Str(value.clone()),
+            FormatterOptionExprValue::Num(value) => FormatterOptionValue::Num(*value),
+            FormatterOptionExprValue::Bool(value) => FormatterOptionValue::Bool(*value),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::parser::parse_message;
@@ -168,5 +192,27 @@ mod tests {
         let message = parse_message("{ $count -> [one] {1} *[other] {n} }").expect("parse");
         let compiled = compile_message(&message);
         assert!(!compiled.program.case_tables.is_empty());
+    }
+
+    #[test]
+    fn compiles_formatter_options_into_program() {
+        let message = parse_message(
+            "{ $value :number style=percent minimum-fraction-digits=2 use-grouping=true }",
+        )
+        .expect("parse");
+        let compiled = compile_message(&message);
+        assert_eq!(compiled.program.formatter_options.len(), 3);
+        match compiled.program.opcodes[1] {
+            mf2_i18n_core::Opcode::CallFmt {
+                fid,
+                opt_start,
+                opt_count,
+            } => {
+                assert_eq!(fid, mf2_i18n_core::FormatterId::Number);
+                assert_eq!(opt_start, 0);
+                assert_eq!(opt_count, 3);
+            }
+            _ => panic!("expected call formatter"),
+        }
     }
 }

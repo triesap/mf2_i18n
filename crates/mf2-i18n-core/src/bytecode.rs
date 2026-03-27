@@ -1,12 +1,13 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::{FormatterId, PluralCategory};
+use crate::{FormatterId, FormatterOption, PluralCategory};
 
 pub type StringIndex = u32;
 pub type NumberIndex = u32;
 pub type ArgIndex = u32;
 pub type CaseTableIndex = u32;
+pub type FormatterOptionIndex = u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PluralRuleset {
@@ -32,7 +33,8 @@ pub enum Opcode {
     Pop,
     CallFmt {
         fid: FormatterId,
-        opt_count: u8,
+        opt_start: FormatterOptionIndex,
+        opt_count: u16,
     },
     Select {
         aidx: ArgIndex,
@@ -104,6 +106,7 @@ pub struct BytecodeProgram {
     pub opcodes: Vec<Opcode>,
     pub string_pool: StringPool,
     pub number_pool: Vec<f64>,
+    pub formatter_options: Vec<FormatterOption>,
     pub case_tables: Vec<CaseTable>,
     pub arg_names: Vec<String>,
 }
@@ -114,6 +117,7 @@ impl BytecodeProgram {
             opcodes: Vec::new(),
             string_pool: StringPool::new(),
             number_pool: Vec::new(),
+            formatter_options: Vec::new(),
             case_tables: Vec::new(),
             arg_names: Vec::new(),
         }
@@ -128,6 +132,12 @@ impl BytecodeProgram {
         let idx = self.arg_names.len();
         self.arg_names.push(name.into());
         idx as ArgIndex
+    }
+
+    pub fn push_formatter_option(&mut self, option: FormatterOption) -> FormatterOptionIndex {
+        let idx = self.formatter_options.len();
+        self.formatter_options.push(option);
+        idx as FormatterOptionIndex
     }
 
     pub fn arg_name(&self, index: ArgIndex) -> Option<&str> {

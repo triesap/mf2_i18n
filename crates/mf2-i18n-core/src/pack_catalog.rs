@@ -1,3 +1,4 @@
+use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -166,6 +167,23 @@ fn decode_message(
     for _ in 0..number_count {
         number_pool.push(read_f64(input, &mut cursor)?);
     }
+    let formatter_option_count = read_u32(input, &mut cursor)? as usize;
+    let mut formatter_options = Vec::with_capacity(formatter_option_count);
+    for _ in 0..formatter_option_count {
+        let key = read_inline_string(input, &mut cursor)?;
+        let tag = read_u8(input, &mut cursor)?;
+        let value = match tag {
+            0 => crate::FormatterOptionValue::Str(read_inline_string(input, &mut cursor)?),
+            1 => crate::FormatterOptionValue::Num(read_f64(input, &mut cursor)?),
+            2 => crate::FormatterOptionValue::Bool(match read_u8(input, &mut cursor)? {
+                0 => false,
+                1 => true,
+                _ => return Err(CoreError::InvalidInput("invalid formatter option bool")),
+            }),
+            _ => return Err(CoreError::InvalidInput("unknown formatter option tag")),
+        };
+        formatter_options.push(crate::FormatterOption { key, value });
+    }
     let opcode_count = read_u32(input, &mut cursor)? as usize;
     let mut opcodes = Vec::with_capacity(opcode_count);
     for _ in 0..opcode_count {
@@ -188,8 +206,13 @@ fn decode_message(
             6 => crate::Opcode::Pop,
             7 => {
                 let fid = FormatterId::try_from(read_u8(input, &mut cursor)?)?;
-                let opt_count = read_u8(input, &mut cursor)?;
-                crate::Opcode::CallFmt { fid, opt_count }
+                let opt_start = read_u32(input, &mut cursor)?;
+                let opt_count = read_u16(input, &mut cursor)?;
+                crate::Opcode::CallFmt {
+                    fid,
+                    opt_start,
+                    opt_count,
+                }
             }
             8 => crate::Opcode::Select {
                 aidx: read_u32(input, &mut cursor)?,
@@ -221,10 +244,26 @@ fn decode_message(
     let mut program = BytecodeProgram::new();
     program.opcodes = opcodes;
     program.number_pool = number_pool;
+    program.formatter_options = formatter_options;
     program.case_tables = case_tables.to_vec();
     program.string_pool = pool;
     program.arg_names = arg_names;
     Ok(program)
+}
+
+fn read_inline_string(input: &[u8], cursor: &mut usize) -> CoreResult<String> {
+    let len = read_u32(input, cursor)? as usize;
+    let end = *cursor + len;
+    if end > input.len() {
+        return Err(CoreError::InvalidInput(
+            "formatter option string out of bounds",
+        ));
+    }
+    let value = core::str::from_utf8(&input[*cursor..end])
+        .map_err(|_| CoreError::InvalidInput("formatter option invalid utf8"))?
+        .to_owned();
+    *cursor = end;
+    Ok(value)
 }
 
 fn read_u8(input: &[u8], cursor: &mut usize) -> CoreResult<u8> {
@@ -378,6 +417,7 @@ mod tests {
         message_index.extend_from_slice(&0u32.to_le_bytes());
 
         let mut message = Vec::new();
+        message.extend_from_slice(&0u32.to_le_bytes());
         message.extend_from_slice(&0u32.to_le_bytes());
         message.extend_from_slice(&2u32.to_le_bytes());
         message.push(0);

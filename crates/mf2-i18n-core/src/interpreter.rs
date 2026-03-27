@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use crate::{
     Args, BytecodeProgram, CaseKey, CaseTable, CoreError, CoreResult, FormatBackend, FormatterId,
-    Opcode, PluralRuleset, Value, format_value,
+    FormatterOption, Opcode, PluralRuleset, Value, format_value,
 };
 
 pub fn execute(
@@ -64,14 +64,16 @@ pub fn execute(
                     .pop()
                     .ok_or(CoreError::InvalidInput("stack underflow"))?;
             }
-            Opcode::CallFmt { fid, opt_count } => {
-                if opt_count != 0 {
-                    return Err(CoreError::Unsupported("formatter options not supported"));
-                }
+            Opcode::CallFmt {
+                fid,
+                opt_start,
+                opt_count,
+            } => {
                 let value = stack
                     .pop()
                     .ok_or(CoreError::InvalidInput("stack underflow"))?;
-                let rendered = format_value(backend, fid, &value, &[])?;
+                let options = formatter_options(program, opt_start, opt_count)?;
+                let rendered = format_value(backend, fid, &value, options)?;
                 stack.push(Value::Str(rendered));
             }
             Opcode::Select { aidx, table } => {
@@ -102,6 +104,23 @@ pub fn execute(
     }
 
     Ok(output)
+}
+
+fn formatter_options(
+    program: &BytecodeProgram,
+    opt_start: u32,
+    opt_count: u16,
+) -> CoreResult<&[FormatterOption]> {
+    let start = opt_start as usize;
+    let end = start
+        .checked_add(opt_count as usize)
+        .ok_or(CoreError::InvalidInput("formatter option range overflow"))?;
+    program
+        .formatter_options
+        .get(start..end)
+        .ok_or(CoreError::InvalidInput(
+            "formatter option range out of bounds",
+        ))
 }
 
 fn select_case(
@@ -237,13 +256,13 @@ fn clone_value(value: &Value) -> CoreResult<Value> {
 #[cfg(test)]
 mod tests {
     use alloc::format;
-    use alloc::string::String;
+    use alloc::string::{String, ToString};
     use alloc::vec;
 
     use super::execute;
     use crate::{
-        Args, BytecodeProgram, DateTimeValue, FormatBackend, FormatterId, FormatterOption, Opcode,
-        PluralCategory, Value,
+        Args, BytecodeProgram, DateTimeValue, FormatBackend, FormatterId, FormatterOption,
+        FormatterOptionValue, Opcode, PluralCategory, Value,
     };
 
     struct TestBackend;
@@ -256,9 +275,27 @@ mod tests {
         fn format_number(
             &self,
             value: f64,
-            _options: &[FormatterOption],
+            options: &[FormatterOption],
         ) -> crate::CoreResult<String> {
-            Ok(format!("num:{value}"))
+            let mut rendered = format!("num:{value}");
+            if !options.is_empty() {
+                rendered.push(':');
+                for (index, option) in options.iter().enumerate() {
+                    if index > 0 {
+                        rendered.push(',');
+                    }
+                    rendered.push_str(&option.key);
+                    rendered.push('=');
+                    match &option.value {
+                        FormatterOptionValue::Str(value) => rendered.push_str(value),
+                        FormatterOptionValue::Num(value) => rendered.push_str(&value.to_string()),
+                        FormatterOptionValue::Bool(value) => {
+                            rendered.push_str(if *value { "true" } else { "false" })
+                        }
+                    }
+                }
+            }
+            Ok(rendered)
         }
 
         fn format_date(
@@ -334,6 +371,7 @@ mod tests {
             Opcode::PushNum { nidx: 0 },
             Opcode::CallFmt {
                 fid: FormatterId::Number,
+                opt_start: 0,
                 opt_count: 0,
             },
             Opcode::EmitStack,
@@ -343,6 +381,35 @@ mod tests {
         let args = Args::new();
         let out = execute(&program, &args, &backend).expect("exec ok");
         assert_eq!(out, "num:3.5");
+    }
+
+    #[test]
+    fn executes_call_fmt_with_options() {
+        let backend = TestBackend;
+        let mut program = BytecodeProgram::new();
+        program.number_pool.push(3.5);
+        program.formatter_options.push(FormatterOption {
+            key: "style".to_string(),
+            value: FormatterOptionValue::Str("percent".to_string()),
+        });
+        program.formatter_options.push(FormatterOption {
+            key: "use-grouping".to_string(),
+            value: FormatterOptionValue::Bool(true),
+        });
+        program.opcodes = vec![
+            Opcode::PushNum { nidx: 0 },
+            Opcode::CallFmt {
+                fid: FormatterId::Number,
+                opt_start: 0,
+                opt_count: 2,
+            },
+            Opcode::EmitStack,
+            Opcode::End,
+        ];
+
+        let args = Args::new();
+        let out = execute(&program, &args, &backend).expect("exec ok");
+        assert_eq!(out, "num:3.5:style=percent,use-grouping=true");
     }
 
     #[test]

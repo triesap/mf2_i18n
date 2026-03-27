@@ -1,44 +1,64 @@
 use crate::lexer::{LexError, Lexer, Span, Token, TokenKind};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     pub segments: Vec<Segment>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Segment {
     Text { value: String, span: Span },
     Expr(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Variable(VarExpr),
     Select(SelectExpr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VarExpr {
     pub name: String,
-    pub formatter: Option<String>,
+    pub formatter: Option<FormatterExpr>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormatterExpr {
+    pub name: String,
+    pub options: Vec<FormatterOptionExpr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormatterOptionExpr {
+    pub key: String,
+    pub value: FormatterOptionExprValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatterOptionExprValue {
+    Str(String),
+    Num(f64),
+    Bool(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum SelectKind {
     Select,
     Plural,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SelectExpr {
     pub selector: String,
     pub cases: Vec<SelectCase>,
     pub kind: SelectKind,
+    pub formatter: Option<FormatterExpr>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SelectCase {
     pub key: CaseKey,
     pub value: Message,
@@ -123,7 +143,7 @@ impl Parser {
         let name = self.expect_ident()?;
         let formatter = if self.peek_is(&TokenKind::Colon) {
             self.next();
-            Some(self.expect_ident()?)
+            Some(self.parse_formatter_expr()?)
         } else {
             None
         };
@@ -132,7 +152,7 @@ impl Parser {
             let cases = self.parse_cases()?;
             let end = self.expect(TokenKind::RBrace)?;
             let mut kind = SelectKind::Select;
-            if formatter.as_deref() == Some("plural") {
+            if formatter.as_ref().map(|formatter| formatter.name.as_str()) == Some("plural") {
                 kind = SelectKind::Plural;
             }
             if cases
@@ -145,6 +165,7 @@ impl Parser {
                 selector: name,
                 cases,
                 kind,
+                formatter,
                 span: span_merge(start, end.span),
             }))
         } else {
@@ -154,6 +175,59 @@ impl Parser {
                 formatter,
                 span: span_merge(start, end.span),
             }))
+        }
+    }
+
+    fn parse_formatter_expr(&mut self) -> Result<FormatterExpr, ParseError> {
+        let name = self.expect_ident()?;
+        let mut options = Vec::new();
+        loop {
+            if self.peek_is(&TokenKind::Comma) {
+                self.next();
+                continue;
+            }
+            if self.peek_is(&TokenKind::Arrow) || self.peek_is(&TokenKind::RBrace) {
+                break;
+            }
+            let Some(token) = self.peek().cloned() else {
+                break;
+            };
+            let TokenKind::Ident(key) = token.kind else {
+                return Err(self.error("expected formatter option", token.span));
+            };
+            self.next();
+            self.expect(TokenKind::Equals)?;
+            let value = self.parse_formatter_option_value()?;
+            options.push(FormatterOptionExpr { key, value });
+        }
+        Ok(FormatterExpr { name, options })
+    }
+
+    fn parse_formatter_option_value(&mut self) -> Result<FormatterOptionExprValue, ParseError> {
+        let token = self.next().ok_or_else(|| {
+            self.error(
+                "unexpected eof",
+                Span {
+                    start: 0,
+                    end: 0,
+                    line: 1,
+                    column: 1,
+                },
+            )
+        })?;
+        match token.kind {
+            TokenKind::Ident(value) => match value.as_str() {
+                "true" => Ok(FormatterOptionExprValue::Bool(true)),
+                "false" => Ok(FormatterOptionExprValue::Bool(false)),
+                _ => Ok(FormatterOptionExprValue::Str(value)),
+            },
+            TokenKind::Number(value) => {
+                let value = value
+                    .parse::<f64>()
+                    .map_err(|_| self.error("invalid formatter option number", token.span))?;
+                Ok(FormatterOptionExprValue::Num(value))
+            }
+            _ => Err(self.error("expected formatter option value", token.span)),
         }
     }
 
@@ -309,7 +383,7 @@ fn span_merge(start: Span, end: Span) -> Span {
 
 #[cfg(test)]
 mod tests {
-    use super::{CaseKey, Expr, Segment, SelectKind, parse_message};
+    use super::{CaseKey, Expr, FormatterOptionExprValue, Segment, SelectKind, parse_message};
 
     #[test]
     fn parses_variable_expression() {
@@ -329,7 +403,43 @@ mod tests {
         let message = parse_message("{ $value :number }").expect("parse");
         match &message.segments[0] {
             Segment::Expr(Expr::Variable(expr)) => {
-                assert_eq!(expr.formatter.as_deref(), Some("number"));
+                assert_eq!(
+                    expr.formatter
+                        .as_ref()
+                        .map(|formatter| formatter.name.as_str()),
+                    Some("number")
+                );
+            }
+            _ => panic!("expected variable expr"),
+        }
+    }
+
+    #[test]
+    fn parses_formatter_options() {
+        let message = parse_message(
+            "{ $value :number style=percent minimum-fraction-digits=2 use-grouping=true }",
+        )
+        .expect("parse");
+        match &message.segments[0] {
+            Segment::Expr(Expr::Variable(expr)) => {
+                let formatter = expr.formatter.as_ref().expect("formatter");
+                assert_eq!(formatter.name, "number");
+                assert_eq!(formatter.options.len(), 3);
+                assert_eq!(formatter.options[0].key, "style");
+                assert_eq!(
+                    formatter.options[0].value,
+                    FormatterOptionExprValue::Str("percent".to_string())
+                );
+                assert_eq!(formatter.options[1].key, "minimum-fraction-digits");
+                assert_eq!(
+                    formatter.options[1].value,
+                    FormatterOptionExprValue::Num(2.0)
+                );
+                assert_eq!(formatter.options[2].key, "use-grouping");
+                assert_eq!(
+                    formatter.options[2].value,
+                    FormatterOptionExprValue::Bool(true)
+                );
             }
             _ => panic!("expected variable expr"),
         }
