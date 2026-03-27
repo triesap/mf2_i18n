@@ -1,23 +1,24 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use mf2_i18n_build::catalog::Catalog;
+use mf2_i18n_build::catalog_reader::{CatalogReadError, load_catalog};
+use mf2_i18n_build::compiler::compile_message;
+use mf2_i18n_build::locale_sources::{LocaleBundle, LocaleSourceError, load_locales};
+use mf2_i18n_build::manifest::{Manifest, PackEntry, sha256_hex};
+use mf2_i18n_build::micro_locales::{MicroLocaleError, load_micro_locales};
+use mf2_i18n_build::pack_encode::{PackBuildInput, encode_pack};
+use mf2_i18n_build::parser::parse_message;
+use mf2_i18n_build::project::{ProjectError, ProjectLayout};
 use thiserror::Error;
 
-use crate::catalog_reader::{CatalogReadError, load_catalog};
 use crate::command_validate::{ValidateCommandError, ValidateOptions, run_validate};
-use crate::compiler::compile_message;
-use crate::config::load_config_or_default;
-use crate::locale_sources::{LocaleSourceError, load_locales};
-use crate::manifest::{Manifest, PackEntry, sha256_hex};
-use crate::micro_locales::{MicroLocaleError, load_micro_locales};
-use crate::pack_encode::{PackBuildInput, encode_pack};
-use crate::parser::parse_message;
 
 #[derive(Debug, Error)]
 pub enum BuildCommandError {
-    #[error("config error: {0}")]
-    Config(#[from] crate::error::CliError),
+    #[error(transparent)]
+    Project(#[from] ProjectError),
     #[error(transparent)]
     Catalog(#[from] CatalogReadError),
     #[error(transparent)]
@@ -45,13 +46,9 @@ pub struct BuildOptions {
 }
 
 pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
-    let config = load_config_or_default(&options.config_path)?;
+    let project = ProjectLayout::load_or_default(&options.config_path)?;
     let bundle = load_catalog(&options.catalog_path, &options.id_map_hash_path)?;
-    let roots: Vec<PathBuf> = config
-        .source_dirs
-        .iter()
-        .map(|root| resolve_path(&options.config_path, root))
-        .collect();
+    let roots = project.source_roots();
 
     run_validate(&ValidateOptions {
         catalog_path: options.catalog_path.clone(),
@@ -60,13 +57,11 @@ pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
     })?;
 
     let locales = load_locales(&roots)?;
-    let micro_locale_map = load_micro_locales(&resolve_path(
-        &options.config_path,
-        config
-            .micro_locales_registry
-            .as_deref()
-            .unwrap_or("micro-locales.toml"),
-    ))?;
+    let micro_locale_map = project
+        .micro_locales_registry_path()
+        .map(|path| load_micro_locales(&path))
+        .transpose()?
+        .unwrap_or_default();
 
     fs::create_dir_all(&options.out_dir)?;
     let packs_dir = options.out_dir.join("packs");
@@ -117,7 +112,7 @@ pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
         schema: 1,
         release_id: options.release_id.clone(),
         generated_at: options.generated_at.clone(),
-        default_locale: config.default_locale,
+        default_locale: project.config().default_locale.clone(),
         supported_locales,
         id_map_hash: format!("sha256:{}", hex::encode(bundle.id_map_hash)),
         mf2_packs,
@@ -133,8 +128,8 @@ pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
 }
 
 fn compile_locale_messages(
-    locale: &crate::locale_sources::LocaleBundle,
-    catalog: &crate::catalog::Catalog,
+    locale: &LocaleBundle,
+    catalog: &Catalog,
 ) -> Result<BTreeMap<mf2_i18n_core::MessageId, mf2_i18n_core::BytecodeProgram>, BuildCommandError> {
     let mut messages = BTreeMap::new();
     for message in &catalog.messages {
@@ -149,21 +144,10 @@ fn compile_locale_messages(
     Ok(messages)
 }
 
-fn resolve_path(config_path: &Path, value: &str) -> PathBuf {
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        return path;
-    }
-    config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{BuildOptions, run_build};
-    use crate::catalog::{Catalog, CatalogFeatures, CatalogMessage};
+    use mf2_i18n_build::catalog::{Catalog, CatalogFeatures, CatalogMessage};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
