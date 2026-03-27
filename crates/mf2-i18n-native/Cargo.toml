@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 mf2-i18n-core = { workspace = true }
 mf2-i18n-runtime = { workspace = true }
 mf2-i18n-embedded = { workspace = true }
+mf2-i18n-std = { workspace = true }
 
 [dev-dependencies]
 hex = { workspace = true }
