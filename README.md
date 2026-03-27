@@ -26,6 +26,10 @@ Unicode MessageFormat v2 (MF2) i18n for Rust, with a no_std core and portable ru
 
 `mf2-i18n-native` owns preferred-locale negotiation and active locale selection for native clients. `NativeLocalizer::set_preferred_locales(...)` negotiates against the available locales, while `define_i18n_module!` requires an explicit `init_policy: strict` or `init_policy: fallback_to_keys` choice for embedded artifacts.
 
+## Platform bundles
+
+Build outputs for generated native runtimes use `platform-bundle.json` as the stable entry point over `manifest.json`, `id-map.json`, and `.mf2pack` files. Code generators should target `mf2_i18n_build::PlatformBundle` and the bundle sidecar instead of stitching those files together ad hoc.
+
 ## Contributing
 
 See `CONTRIBUTING.md`.

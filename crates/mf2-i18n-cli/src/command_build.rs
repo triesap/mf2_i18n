@@ -2,14 +2,19 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use mf2_i18n_build::artifacts::write_id_map_entries;
 use mf2_i18n_build::catalog::Catalog;
 use mf2_i18n_build::catalog_reader::{CatalogReadError, load_catalog};
 use mf2_i18n_build::compiler::compile_message;
+use mf2_i18n_build::id_map::IdMap;
 use mf2_i18n_build::locale_sources::{LocaleBundle, LocaleSourceError, load_locales};
 use mf2_i18n_build::manifest::{Manifest, PackEntry, sha256_hex};
 use mf2_i18n_build::micro_locales::{MicroLocaleError, load_micro_locales};
 use mf2_i18n_build::pack_encode::{PackBuildInput, encode_pack};
 use mf2_i18n_build::parser::parse_message;
+use mf2_i18n_build::platform::{
+    PlatformBundleManifest, derive_id_map_entries_from_catalog, write_platform_bundle_manifest,
+};
 use mf2_i18n_build::project::{ProjectError, ProjectLayout};
 use thiserror::Error;
 
@@ -122,8 +127,34 @@ pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
         signing: None,
     };
 
+    let platform_id_map = derive_id_map_entries_from_catalog(&bundle.catalog);
+    let mut id_map = IdMap::new();
+    for (key, id) in &platform_id_map {
+        id_map
+            .insert(key.clone(), mf2_i18n_core::MessageId::new(*id))
+            .map_err(|err| BuildCommandError::Io(std::io::Error::other(err.to_string())))?;
+    }
+    if id_map
+        .hash()
+        .map_err(|err| std::io::Error::other(err.to_string()))?
+        != bundle.id_map_hash
+    {
+        return Err(BuildCommandError::Io(std::io::Error::other(
+            "catalog ids do not match id map hash",
+        )));
+    }
+
+    let id_map_path = options.out_dir.join("id-map.json");
+    write_id_map_entries(&id_map_path, &platform_id_map)
+        .map_err(|err| BuildCommandError::Io(std::io::Error::other(err.to_string())))?;
+
     let manifest_path = options.out_dir.join("manifest.json");
     fs::write(&manifest_path, manifest.to_canonical_bytes())?;
+
+    let platform_bundle = PlatformBundleManifest::new(manifest, "id-map.json");
+    let platform_bundle_path = options.out_dir.join("platform-bundle.json");
+    write_platform_bundle_manifest(&platform_bundle_path, &platform_bundle)
+        .map_err(|err| BuildCommandError::Io(std::io::Error::other(err.to_string())))?;
     Ok(())
 }
 
@@ -148,6 +179,8 @@ fn compile_locale_messages(
 mod tests {
     use super::{BuildOptions, run_build};
     use mf2_i18n_build::catalog::{Catalog, CatalogFeatures, CatalogMessage};
+    use mf2_i18n_build::id_map::IdMap;
+    use mf2_i18n_build::platform::derive_id_map_entries_from_catalog;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -185,10 +218,20 @@ mod tests {
         };
         let catalog_path = dir.join("i18n.catalog.json");
         fs::write(&catalog_path, serde_json::to_string(&catalog).unwrap()).expect("catalog");
+        let derived_entries = derive_id_map_entries_from_catalog(&catalog);
+        let mut id_map = IdMap::new();
+        for (key, id) in &derived_entries {
+            id_map
+                .insert(key.clone(), mf2_i18n_core::MessageId::new(*id))
+                .expect("id map insert");
+        }
         let hash_path = dir.join("id_map_hash");
         fs::write(
             &hash_path,
-            "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            format!(
+                "sha256:{}",
+                hex::encode(id_map.hash().expect("id map hash"))
+            ),
         )
         .expect("hash");
 
@@ -211,7 +254,9 @@ mod tests {
         .expect("build");
 
         assert!(out_dir.join("manifest.json").exists());
+        assert!(out_dir.join("id-map.json").exists());
         assert!(out_dir.join("packs/en.mf2pack").exists());
+        assert!(out_dir.join("platform-bundle.json").exists());
 
         fs::remove_dir_all(&dir).ok();
     }
