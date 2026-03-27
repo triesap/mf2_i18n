@@ -224,8 +224,9 @@ mod tests {
     use mf2_i18n_build::pack_encode::{PackBuildInput, encode_pack};
     use mf2_i18n_build::parser::parse_message;
     use mf2_i18n_core::{Args, MessageId, PackKind, Value};
+    use mf2_i18n_std::StdFormatBackend;
 
-    fn build_pack_bytes(id_map_hash: [u8; 32], source: &str) -> Vec<u8> {
+    fn build_pack_bytes(id_map_hash: [u8; 32], locale_tag: &str, source: &str) -> Vec<u8> {
         let message = parse_message(source).expect("parse");
         let compiled = compile_message(&message);
         let mut messages = BTreeMap::new();
@@ -233,7 +234,7 @@ mod tests {
         encode_pack(&PackBuildInput {
             pack_kind: PackKind::Base,
             id_map_hash,
-            locale_tag: "en".to_string(),
+            locale_tag: locale_tag.to_string(),
             parent_tag: None,
             build_epoch_ms: 0,
             messages,
@@ -276,6 +277,19 @@ mod tests {
     }
 
     #[test]
+    fn embedded_runtime_uses_std_backend_when_requested() {
+        let runtime = build_runtime_for_locale("fr", "home.total", "{ $count:number }");
+        let mut args = Args::new();
+        args.insert("count", Value::Num(12345.5));
+        let backend = StdFormatBackend::new("fr-BE").expect("backend");
+
+        let output = runtime
+            .format_with_backend("fr-BE", "home.total", &args, &backend)
+            .expect("format");
+        assert_eq!(output, "12\u{202f}345,5");
+    }
+
+    #[test]
     fn embedded_plural_requires_backend_when_exact_match_is_absent() {
         let runtime = build_runtime(
             "home.count",
@@ -294,14 +308,18 @@ mod tests {
     }
 
     fn build_runtime(key: &str, source: &str) -> EmbeddedRuntime {
+        build_runtime_for_locale("en", key, source)
+    }
+
+    fn build_runtime_for_locale(locale: &str, key: &str, source: &str) -> EmbeddedRuntime {
         let mut id_map = BTreeMap::new();
         id_map.insert(key.to_string(), MessageId::new(0));
         let id_map_hash = [7u8; 32];
-        let pack_bytes = build_pack_bytes(id_map_hash, source);
+        let pack_bytes = build_pack_bytes(id_map_hash, locale, source);
         let packs = [EmbeddedPack {
-            locale: "en",
+            locale,
             bytes: &pack_bytes,
         }];
-        EmbeddedRuntime::new(id_map, id_map_hash, &packs, "en").expect("runtime")
+        EmbeddedRuntime::new(id_map, id_map_hash, &packs, locale).expect("runtime")
     }
 }
