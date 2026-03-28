@@ -146,13 +146,23 @@ impl NativeLocalizer {
             .collect()
     }
 
-    pub fn tr(&self, key: &str) -> String {
+    pub fn tr(&self, key: &str) -> NativeResult<String> {
         let args = Args::new();
         self.tr_with_args(key, &args)
     }
 
-    pub fn tr_with_args(&self, key: &str, args: &Args) -> String {
-        self.format(key, args).unwrap_or_else(|_| key.to_owned())
+    pub fn tr_with_args(&self, key: &str, args: &Args) -> NativeResult<String> {
+        self.format(key, args)
+    }
+
+    pub fn tr_or_key(&self, key: &str) -> String {
+        let args = Args::new();
+        self.tr_with_args_or_key(key, &args)
+    }
+
+    pub fn tr_with_args_or_key(&self, key: &str, args: &Args) -> String {
+        self.tr_with_args(key, args)
+            .unwrap_or_else(|_| key.to_owned())
     }
 
     pub fn format(&self, key: &str, args: &Args) -> NativeResult<String> {
@@ -296,7 +306,8 @@ mod tests {
         .expect("localizer");
 
         assert!(localizer.is_ready());
-        assert_eq!(localizer.tr("home.title"), "hi");
+        assert_eq!(localizer.tr("home.title").expect("translation"), "hi");
+        assert_eq!(localizer.tr_or_key("home.title"), "hi");
         assert_eq!(localizer.default_locale(), "en");
         assert_eq!(localizer.supported_locales(), vec!["en".to_string()]);
     }
@@ -305,7 +316,11 @@ mod tests {
     fn fallback_localizer_uses_key() {
         let localizer = NativeLocalizer::fallback("en");
         assert!(!localizer.is_ready());
-        assert_eq!(localizer.tr("home.title"), "home.title");
+        assert!(matches!(
+            localizer.tr("home.title"),
+            Err(crate::NativeError::NotInitialized)
+        ));
+        assert_eq!(localizer.tr_or_key("home.title"), "home.title");
         assert_eq!(localizer.preferred_locales(), vec!["en".to_string()]);
     }
 
@@ -408,7 +423,7 @@ mod tests {
             localizer.supported_locales(),
             vec!["en".to_string(), "fr".to_string()]
         );
-        assert_eq!(localizer.tr("home.title"), "salut");
+        assert_eq!(localizer.tr("home.title").expect("translation"), "salut");
     }
 
     #[test]
@@ -454,5 +469,46 @@ mod tests {
             .expect("locale");
         assert_eq!(selected, "fr-CA");
         assert_eq!(localizer.locale(), "fr-CA");
+    }
+
+    #[test]
+    fn fallback_helpers_do_not_hide_strict_translation_failures() {
+        let id_map_json = br#"{"home.distance": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let pack = build_pack_bytes(id_map_hash, "en", "{ $distance:unit }");
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [EmbeddedPack {
+            locale: "en",
+            bytes: &pack,
+        }];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+
+        let mut args = Args::new();
+        args.insert(
+            "distance",
+            mf2_i18n_core::Value::Unit {
+                value: 12.5,
+                unit_id: 7,
+            },
+        );
+
+        let err = localizer
+            .tr_with_args("home.distance", &args)
+            .expect_err("strict translation should fail");
+        assert_eq!(
+            err.to_string(),
+            "core error: unsupported: unit formatting requires unit label data"
+        );
+        assert_eq!(
+            localizer.tr_with_args_or_key("home.distance", &args),
+            "home.distance"
+        );
     }
 }
