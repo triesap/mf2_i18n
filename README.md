@@ -28,6 +28,8 @@ Unicode MessageFormat v2 (MF2) i18n for Rust, with a no_std core and portable ru
 
 For std targets, `mf2-i18n-runtime::Runtime::format()` and `mf2-i18n-native::NativeLocalizer::format()` use `mf2-i18n-std::StdFormatBackend` by default. `mf2-i18n-embedded::EmbeddedRuntime::format()` still defaults to `UnsupportedFormatBackend`; use `format_with_backend(...)` when an embedded host needs locale-sensitive plural, number, date, time, datetime, unit, or currency output.
 
+`mf2-i18n-native` keeps strict translation and key-fallback convenience separate. Use `tr(...)` or `tr_with_args(...)` when the caller wants a `Result`, and use `tr_or_key(...)` or `tr_with_args_or_key(...)` when key fallback is intentional.
+
 `BasicFormatBackend` remains available for diagnostics and simple tests. It does not provide locale-sensitive output.
 
 Datetime arguments use `mf2_i18n_core::DateTimeValue`, with explicit `unix_seconds(...)` and `unix_milliseconds(...)` constructors. Runtime formatting does not infer timestamp units from magnitude.

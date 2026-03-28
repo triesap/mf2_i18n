@@ -54,12 +54,20 @@ macro_rules! define_i18n_module {
             LOCALIZER.supported_locales()
         }
 
-        pub fn tr(key: &str) -> String {
+        pub fn tr(key: &str) -> $crate::NativeResult<String> {
             LOCALIZER.tr(key)
         }
 
-        pub fn tr_with_args(key: &str, args: &$crate::Args) -> String {
+        pub fn tr_with_args(key: &str, args: &$crate::Args) -> $crate::NativeResult<String> {
             LOCALIZER.tr_with_args(key, args)
+        }
+
+        pub fn tr_or_key(key: &str) -> String {
+            LOCALIZER.tr_or_key(key)
+        }
+
+        pub fn tr_with_args_or_key(key: &str, args: &$crate::Args) -> String {
+            LOCALIZER.tr_with_args_or_key(key, args)
         }
 
         pub fn format(key: &str, args: &$crate::Args) -> $crate::NativeResult<String> {
@@ -119,12 +127,20 @@ macro_rules! define_i18n_module {
             LOCALIZER.supported_locales()
         }
 
-        pub fn tr(key: &str) -> String {
+        pub fn tr(key: &str) -> $crate::NativeResult<String> {
             LOCALIZER.tr(key)
         }
 
-        pub fn tr_with_args(key: &str, args: &$crate::Args) -> String {
+        pub fn tr_with_args(key: &str, args: &$crate::Args) -> $crate::NativeResult<String> {
             LOCALIZER.tr_with_args(key, args)
+        }
+
+        pub fn tr_or_key(key: &str) -> String {
+            LOCALIZER.tr_or_key(key)
+        }
+
+        pub fn tr_with_args_or_key(key: &str, args: &$crate::Args) -> String {
+            LOCALIZER.tr_with_args_or_key(key, args)
         }
 
         pub fn format(key: &str, args: &$crate::Args) -> $crate::NativeResult<String> {
@@ -163,7 +179,11 @@ mod tests {
             generated_fallback::supported_locales(),
             vec!["en".to_string()]
         );
-        assert_eq!(generated_fallback::tr("home.title"), "home.title");
+        assert!(matches!(
+            generated_fallback::tr("home.title"),
+            Err(crate::NativeError::NotInitialized)
+        ));
+        assert_eq!(generated_fallback::tr_or_key("home.title"), "home.title");
     }
 
     #[test]

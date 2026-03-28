@@ -32,6 +32,8 @@ Use `mf2-i18n-native` when a native client wants Rust-owned locale negotiation a
 - entry point: `mf2_i18n_native::NativeLocalizer`
 - locale negotiation: `set_preferred_locales(...)`
 - locale-sensitive formatting: `NativeLocalizer::format(...)` uses `mf2-i18n-std::StdFormatBackend` by default
+- strict translation: `NativeLocalizer::tr(...)` and `NativeLocalizer::tr_with_args(...)`
+- key fallback convenience: `NativeLocalizer::tr_or_key(...)` and `NativeLocalizer::tr_with_args_or_key(...)`
 - generated module setup: `define_i18n_module!` with `init_policy: strict` or `init_policy: fallback_to_keys`
 
 This is the bridge path for Apple and other std-target native hosts that can call Rust directly.
