@@ -36,6 +36,8 @@ Datetime arguments use `mf2_i18n_core::DateTimeValue`, with explicit `unix_secon
 
 Formatter calls may include literal named options such as `{ $total :number style=percent minimum-fraction-digits=2 }`. The build pipeline preserves those options in compiled artifacts and passes them through to runtime format backends.
 
+`mf2_i18n_build::compile_message(...)` and the build pipeline reject unknown formatter names instead of compiling them as identity formatting.
+
 `StdFormatBackend` resolves locale data only from the requested locale chain. It does not silently fall back to unrelated global defaults. Use `StdFormatBackend::resolution()` to inspect the requested locale, plural locale, number locale, and date locale that were resolved.
 
 `StdFormatBackend` formats currency values with locale-sensitive decimal output and ISO 4217 code display. The supported currency option surface is `display=code` or no display option. Unit formatting does not invent labels from opaque `unit_id` values; it returns an explicit unsupported error until a unit label source is available.

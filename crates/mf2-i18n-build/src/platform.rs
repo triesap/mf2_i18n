@@ -267,7 +267,7 @@ mod tests {
 
     fn build_pack_bytes(id_map_hash: [u8; 32], locale_tag: &str, source: &str) -> Vec<u8> {
         let message = parse_message(source).expect("parse");
-        let compiled = compile_message(&message);
+        let compiled = compile_message(&message).expect("compile");
         let mut messages = BTreeMap::new();
         messages.insert(MessageId::new(0), compiled.program);
         encode_pack(&PackBuildInput {

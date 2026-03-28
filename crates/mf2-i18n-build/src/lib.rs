@@ -23,6 +23,7 @@ pub mod platform;
 pub mod project;
 pub mod validator;
 
+pub use crate::compiler::CompileError;
 pub use crate::config::{ProjectConfig, load_project_config, load_project_config_or_default};
 pub use crate::error::BuildIoError;
 pub use crate::platform::{
