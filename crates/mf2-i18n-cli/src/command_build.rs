@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use mf2_i18n_build::artifacts::write_id_map_entries;
 use mf2_i18n_build::catalog::Catalog;
 use mf2_i18n_build::catalog_reader::{CatalogReadError, load_catalog};
-use mf2_i18n_build::compiler::compile_message;
+use mf2_i18n_build::compiler::{CompileError, compile_message};
 use mf2_i18n_build::id_map::IdMap;
 use mf2_i18n_build::locale_sources::{LocaleBundle, LocaleSourceError, load_locales};
 use mf2_i18n_build::manifest::{Manifest, PackEntry, sha256_hex};
@@ -36,6 +36,12 @@ pub enum BuildCommandError {
     MissingMessage(String, String),
     #[error("parse error for {0}: {1}")]
     ParseError(String, String),
+    #[error("compile error for {key}: {source}")]
+    Compile {
+        key: String,
+        #[source]
+        source: CompileError,
+    },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -169,7 +175,10 @@ fn compile_locale_messages(
         })?;
         let parsed = parse_message(&entry.value)
             .map_err(|err| BuildCommandError::ParseError(message.key.clone(), err.message))?;
-        let compiled = compile_message(&parsed);
+        let compiled = compile_message(&parsed).map_err(|source| BuildCommandError::Compile {
+            key: message.key.clone(),
+            source,
+        })?;
         messages.insert(mf2_i18n_core::MessageId::new(message.id), compiled.program);
     }
     Ok(messages)
@@ -177,7 +186,8 @@ fn compile_locale_messages(
 
 #[cfg(test)]
 mod tests {
-    use super::{BuildOptions, run_build};
+    use super::{BuildCommandError, BuildOptions, run_build};
+    use crate::command_validate::ValidateCommandError;
     use mf2_i18n_build::catalog::{Catalog, CatalogFeatures, CatalogMessage};
     use mf2_i18n_build::id_map::IdMap;
     use mf2_i18n_build::platform::derive_id_map_entries_from_catalog;
@@ -257,6 +267,79 @@ mod tests {
         assert!(out_dir.join("id-map.json").exists());
         assert!(out_dir.join("packs/en.mf2pack").exists());
         assert!(out_dir.join("platform-bundle.json").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_rejects_unknown_formatter() {
+        let dir = temp_dir();
+        let locales_dir = dir.join("locales").join("en");
+        fs::create_dir_all(&locales_dir).expect("locale");
+        fs::write(
+            locales_dir.join("messages.mf2"),
+            "home.title = { $value :weird }",
+        )
+        .expect("write");
+
+        let catalog = Catalog {
+            schema: 1,
+            project: "demo".to_string(),
+            generated_at: "2026-02-01T00:00:00Z".to_string(),
+            default_locale: "en".to_string(),
+            messages: vec![CatalogMessage {
+                key: "home.title".to_string(),
+                id: 1,
+                args: vec![mf2_i18n_build::model::ArgSpec {
+                    name: "value".to_string(),
+                    arg_type: mf2_i18n_build::model::ArgType::String,
+                    required: true,
+                }],
+                features: CatalogFeatures::default(),
+                source_refs: None,
+            }],
+        };
+        let catalog_path = dir.join("i18n.catalog.json");
+        fs::write(&catalog_path, serde_json::to_string(&catalog).unwrap()).expect("catalog");
+        let derived_entries = derive_id_map_entries_from_catalog(&catalog);
+        let mut id_map = IdMap::new();
+        for (key, id) in &derived_entries {
+            id_map
+                .insert(key.clone(), mf2_i18n_core::MessageId::new(*id))
+                .expect("id map insert");
+        }
+        let hash_path = dir.join("id_map_hash");
+        fs::write(
+            &hash_path,
+            format!(
+                "sha256:{}",
+                hex::encode(id_map.hash().expect("id map hash"))
+            ),
+        )
+        .expect("hash");
+
+        let config_path = dir.join("mf2-i18n.toml");
+        fs::write(
+            &config_path,
+            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"tools/id_salt.txt\"",
+        )
+        .expect("config");
+
+        let err = run_build(&BuildOptions {
+            catalog_path,
+            id_map_hash_path: hash_path,
+            config_path,
+            out_dir: dir.join("out"),
+            release_id: "r1".to_string(),
+            generated_at: "2026-02-01T00:00:00Z".to_string(),
+        })
+        .expect_err("build should fail");
+
+        assert!(matches!(
+            err,
+            BuildCommandError::Validate(ValidateCommandError::Failed(_))
+                | BuildCommandError::Compile { .. }
+        ));
 
         fs::remove_dir_all(&dir).ok();
     }

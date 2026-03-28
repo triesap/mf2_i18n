@@ -4,23 +4,34 @@ use mf2_i18n_core::{
     BytecodeProgram, CaseEntry, CaseKey, CaseTable, FormatterId, FormatterOption,
     FormatterOptionValue, Opcode, PluralRuleset,
 };
+use thiserror::Error;
 
 use crate::parser::{
     CaseKey as AstCaseKey, Expr, FormatterOptionExpr, FormatterOptionExprValue, Message, Segment,
     SelectKind, VarExpr,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum CompileError {
+    #[error("unknown formatter `{name}` at {line}:{column}")]
+    UnknownFormatter {
+        name: String,
+        line: u32,
+        column: u32,
+    },
+}
+
 pub struct CompileResult {
     pub program: BytecodeProgram,
 }
 
-pub fn compile_message(message: &Message) -> CompileResult {
+pub fn compile_message(message: &Message) -> Result<CompileResult, CompileError> {
     let mut compiler = Compiler::new();
-    compiler.compile_message(message);
+    compiler.compile_message(message)?;
     compiler.program.opcodes.push(Opcode::End);
-    CompileResult {
+    Ok(CompileResult {
         program: compiler.program,
-    }
+    })
 }
 
 struct Compiler {
@@ -36,7 +47,7 @@ impl Compiler {
         }
     }
 
-    fn compile_message(&mut self, message: &Message) {
+    fn compile_message(&mut self, message: &Message) -> Result<(), CompileError> {
         for segment in &message.segments {
             match segment {
                 Segment::Text { value, .. } => {
@@ -44,18 +55,19 @@ impl Compiler {
                     self.program.opcodes.push(Opcode::EmitText { sidx });
                 }
                 Segment::Expr(expr) => match expr {
-                    Expr::Variable(var) => self.compile_var(var),
-                    Expr::Select(select) => self.compile_select(select),
+                    Expr::Variable(var) => self.compile_var(var)?,
+                    Expr::Select(select) => self.compile_select(select)?,
                 },
             }
         }
+        Ok(())
     }
 
-    fn compile_var(&mut self, var: &VarExpr) {
+    fn compile_var(&mut self, var: &VarExpr) -> Result<(), CompileError> {
         let aidx = self.arg_index(&var.name);
         self.program.opcodes.push(Opcode::PushArg { aidx });
         if let Some(formatter) = &var.formatter {
-            let fid = formatter_id(&formatter.name);
+            let fid = formatter_id(&formatter.name, var.span.line, var.span.column)?;
             let opt_start = self.program.formatter_options.len() as u32;
             for option in &formatter.options {
                 self.program
@@ -70,9 +82,19 @@ impl Compiler {
             });
         }
         self.program.opcodes.push(Opcode::EmitStack);
+        Ok(())
     }
 
-    fn compile_select(&mut self, select: &crate::parser::SelectExpr) {
+    fn compile_select(&mut self, select: &crate::parser::SelectExpr) -> Result<(), CompileError> {
+        if let Some(formatter) = &select.formatter
+            && formatter.name != "plural"
+        {
+            return Err(CompileError::UnknownFormatter {
+                name: formatter.name.clone(),
+                line: select.span.line,
+                column: select.span.column,
+            });
+        }
         let aidx = self.arg_index(&select.selector);
         let table_idx = self.program.case_tables.len() as u32;
         let select_pos = self.program.opcodes.len();
@@ -97,7 +119,7 @@ impl Compiler {
                 key: compile_case_key(&mut self.program, &case.key, case.is_default),
                 target: start,
             });
-            self.compile_message(&case.value);
+            self.compile_message(&case.value)?;
             let jump_pos = self.program.opcodes.len();
             self.program.opcodes.push(Opcode::Jump { rel: 0 });
             jumps.push(jump_pos);
@@ -125,6 +147,7 @@ impl Compiler {
         }
 
         self.program.case_tables.push(CaseTable { entries });
+        Ok(())
     }
 
     fn arg_index(&mut self, name: &str) -> u32 {
@@ -137,15 +160,20 @@ impl Compiler {
     }
 }
 
-fn formatter_id(name: &str) -> FormatterId {
+fn formatter_id(name: &str, line: u32, column: u32) -> Result<FormatterId, CompileError> {
     match name {
-        "number" => FormatterId::Number,
-        "date" => FormatterId::Date,
-        "time" => FormatterId::Time,
-        "datetime" => FormatterId::DateTime,
-        "unit" => FormatterId::Unit,
-        "currency" => FormatterId::Currency,
-        _ => FormatterId::Identity,
+        "number" => Ok(FormatterId::Number),
+        "date" => Ok(FormatterId::Date),
+        "time" => Ok(FormatterId::Time),
+        "datetime" => Ok(FormatterId::DateTime),
+        "unit" => Ok(FormatterId::Unit),
+        "currency" => Ok(FormatterId::Currency),
+        "identity" => Ok(FormatterId::Identity),
+        _ => Err(CompileError::UnknownFormatter {
+            name: name.to_string(),
+            line,
+            column,
+        }),
     }
 }
 
@@ -178,19 +206,19 @@ fn compile_formatter_option(option: &FormatterOptionExpr) -> FormatterOption {
 mod tests {
     use crate::parser::parse_message;
 
-    use super::compile_message;
+    use super::{CompileError, compile_message};
 
     #[test]
     fn compiles_simple_message() {
         let message = parse_message("Hello { $name }").expect("parse");
-        let compiled = compile_message(&message);
+        let compiled = compile_message(&message).expect("compile");
         assert!(!compiled.program.opcodes.is_empty());
     }
 
     #[test]
     fn compiles_select_message() {
         let message = parse_message("{ $count -> [one] {1} *[other] {n} }").expect("parse");
-        let compiled = compile_message(&message);
+        let compiled = compile_message(&message).expect("compile");
         assert!(!compiled.program.case_tables.is_empty());
     }
 
@@ -200,7 +228,7 @@ mod tests {
             "{ $value :number style=percent minimum-fraction-digits=2 use-grouping=true }",
         )
         .expect("parse");
-        let compiled = compile_message(&message);
+        let compiled = compile_message(&message).expect("compile");
         assert_eq!(compiled.program.formatter_options.len(), 3);
         match compiled.program.opcodes[1] {
             mf2_i18n_core::Opcode::CallFmt {
@@ -214,5 +242,39 @@ mod tests {
             }
             _ => panic!("expected call formatter"),
         }
+    }
+
+    #[test]
+    fn rejects_unknown_variable_formatter() {
+        let message = parse_message("{ $value :weird }").expect("parse");
+        let err = match compile_message(&message) {
+            Ok(_) => panic!("compile should fail"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            err,
+            CompileError::UnknownFormatter {
+                name: "weird".to_string(),
+                line: 1,
+                column: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_select_formatter() {
+        let message = parse_message("{ $value :weird -> *[other] {x} }").expect("parse");
+        let err = match compile_message(&message) {
+            Ok(_) => panic!("compile should fail"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            err,
+            CompileError::UnknownFormatter {
+                name: "weird".to_string(),
+                line: 1,
+                column: 3,
+            }
+        );
     }
 }

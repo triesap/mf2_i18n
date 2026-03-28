@@ -49,6 +49,15 @@ fn validate_var(var: &VarExpr, spec: &MessageSpec, diagnostics: &mut Vec<Diagnos
 }
 
 fn validate_select(select: &SelectExpr, spec: &MessageSpec, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(formatter) = &select.formatter
+        && formatter.name != "plural"
+    {
+        diagnostics.push(Diagnostic::new("MF2E030", "unknown formatter").with_span(
+            spec.key.clone(),
+            select.span.line,
+            select.span.column,
+        ));
+    }
     let has_other = select
         .cases
         .iter()
@@ -149,6 +158,20 @@ mod tests {
             &spec(vec![ArgSpec {
                 name: "value".to_string(),
                 arg_type: ArgType::String,
+                required: true,
+            }]),
+        );
+        assert!(diagnostics.iter().any(|d| d.code == "MF2E030"));
+    }
+
+    #[test]
+    fn reports_unknown_select_formatter() {
+        let message = parse_message("{ $count :weird -> *[other] {n} }").expect("parse");
+        let diagnostics = validate_message(
+            &message,
+            &spec(vec![ArgSpec {
+                name: "count".to_string(),
+                arg_type: ArgType::Number,
                 required: true,
             }]),
         );
