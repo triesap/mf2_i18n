@@ -1,1 +1,1 @@
-https://github.com/triesap/mf2-i18n
+https://github.com/triesap/mf2_i18n

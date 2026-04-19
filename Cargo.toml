@@ -10,7 +10,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 authors = ["Tyson Lupul <tyson@radroots.org>"]
 readme = "README.md"
-repository = "https://github.com/triesap/mf2-i18n"
+repository = "https://github.com/triesap/mf2_i18n"
 rust-version = "1.92.0"
 
 [workspace.lints.rust]
