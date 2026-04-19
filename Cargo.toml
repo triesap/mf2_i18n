@@ -27,6 +27,7 @@ thiserror = "1.0"
 toml = "0.8"
 mf2_i18n_build = { version = "0.1.0", path = "crates/mf2_i18n_build" }
 mf2_i18n_core = { version = "0.1.0", path = "crates/mf2_i18n_core" }
+mf2_i18n_native = { version = "0.1.0", path = "crates/mf2_i18n_native" }
 mf2_i18n_runtime = { version = "0.1.0", path = "crates/mf2_i18n_runtime" }
 mf2_i18n_embedded = { version = "0.1.0", path = "crates/mf2_i18n_embedded" }
 mf2_i18n_std = { version = "0.1.0", path = "crates/mf2_i18n_std" }
