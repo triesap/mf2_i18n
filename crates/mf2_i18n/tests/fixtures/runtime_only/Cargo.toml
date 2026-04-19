@@ -1,0 +1,9 @@
+[package]
+name = "mf2_i18n_facade_runtime_only_fixture"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+mf2_i18n = { path = "../../..", features = ["native"] }

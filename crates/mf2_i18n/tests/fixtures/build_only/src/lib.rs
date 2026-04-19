@@ -1,0 +1,1 @@
+pub const DEFAULT_LOCALE: &str = env!("MF2_BUILD_ONLY_DEFAULT_LOCALE");
