@@ -245,7 +245,7 @@ mod tests {
         )
         .expect("hash");
 
-        let config_path = dir.join("mf2-i18n.toml");
+        let config_path = dir.join("mfs_i18n.toml");
         fs::write(
             &config_path,
             "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"tools/id_salt.txt\"",
@@ -318,7 +318,7 @@ mod tests {
         )
         .expect("hash");
 
-        let config_path = dir.join("mf2-i18n.toml");
+        let config_path = dir.join("mfs_i18n.toml");
         fs::write(
             &config_path,
             "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"tools/id_salt.txt\"",

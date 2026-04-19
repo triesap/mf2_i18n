@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to mf2-i18n.
+Thanks for your interest in contributing to mfs_i18n.
 
 ## Ways to help
 
