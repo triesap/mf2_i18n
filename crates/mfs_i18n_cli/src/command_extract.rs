@@ -75,7 +75,7 @@ mod tests {
         let salt_path = dir.join("id_salt.txt");
         fs::write(&salt_path, "salt").expect("salt");
 
-        let config_path = dir.join("mf2-i18n.toml");
+        let config_path = dir.join("mfs_i18n.toml");
         let config_contents = format!(
             "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nmicro_locales_registry = \"micro-locales.toml\"\nproject_salt_path = \"{}\"\n",
             salt_path.display()

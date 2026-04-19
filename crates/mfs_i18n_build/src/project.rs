@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn resolves_project_relative_paths_and_salt() {
         let root = temp_dir();
-        let config_path = root.join("mf2-i18n.toml");
+        let config_path = root.join("mfs_i18n.toml");
         let salt_dir = root.join("tools");
         fs::create_dir_all(&salt_dir).expect("salt dir");
         fs::write(salt_dir.join("id_salt.txt"), "salt").expect("salt");

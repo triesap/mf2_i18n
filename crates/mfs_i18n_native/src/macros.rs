@@ -23,7 +23,7 @@ macro_rules! define_i18n_module {
                     $id_map_hash,
                     &packs,
                 )
-                .expect("mf2-i18n native module failed to initialize")
+                .expect("mfs_i18n native module failed to initialize")
             });
 
         pub fn localizer() -> &'static $crate::NativeLocalizer {

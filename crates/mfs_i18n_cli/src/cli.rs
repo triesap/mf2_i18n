@@ -71,7 +71,7 @@ fn parse_extract_options(args: Vec<String>) -> Result<ExtractOptions, CliAppErro
     let mut project = None;
     let mut roots = Vec::new();
     let mut out_dir = PathBuf::from("i18n");
-    let mut config_path = PathBuf::from("mf2-i18n.toml");
+    let mut config_path = PathBuf::from("mfs_i18n.toml");
     let mut generated_at = None;
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
@@ -107,13 +107,13 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2-i18n-cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2-i18n-cli build --catalog <path> --id-map-hash <path> --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2-i18n-cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]\n       mf2-i18n-cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>]\n       mf2-i18n-cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>]".to_string()
+    "usage: mfs_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mfs_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mfs_i18n_cli build --catalog <path> --id-map-hash <path> --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mfs_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]\n       mfs_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>]\n       mfs_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>]".to_string()
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
     let mut catalog_path = None;
     let mut id_map_hash_path = None;
-    let mut config_path = PathBuf::from("mf2-i18n.toml");
+    let mut config_path = PathBuf::from("mfs_i18n.toml");
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -141,7 +141,7 @@ fn parse_build_options(args: Vec<String>) -> Result<BuildOptions, CliAppError> {
     let mut release_id = None;
     let mut generated_at = None;
     let mut out_dir = PathBuf::from("i18n-build");
-    let mut config_path = PathBuf::from("mf2-i18n.toml");
+    let mut config_path = PathBuf::from("mfs_i18n.toml");
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -204,7 +204,7 @@ fn parse_pseudo_options(args: Vec<String>) -> Result<PseudoOptions, CliAppError>
     let mut locale = None;
     let mut target = None;
     let mut out_dir = PathBuf::from("locales");
-    let mut config_path = PathBuf::from("mf2-i18n.toml");
+    let mut config_path = PathBuf::from("mfs_i18n.toml");
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -230,7 +230,7 @@ fn parse_coverage_options(args: Vec<String>) -> Result<CoverageOptions, CliAppEr
     let mut catalog_path = None;
     let mut id_map_hash_path = None;
     let mut out_path = PathBuf::from("coverage.json");
-    let mut config_path = PathBuf::from("mf2-i18n.toml");
+    let mut config_path = PathBuf::from("mfs_i18n.toml");
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {

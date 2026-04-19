@@ -157,7 +157,7 @@ mod tests {
         fs::create_dir_all(&locale_dir).expect("locale");
         fs::write(locale_dir.join("messages.mf2"), "home.title = Hello").expect("write");
 
-        let config_path = root.join("mf2-i18n.toml");
+        let config_path = root.join("mfs_i18n.toml");
         fs::write(
             &config_path,
             "default_locale = \"en\"\nsource_dirs = [\".\"]\nmicro_locales_registry = \"micro-locales.toml\"\nproject_salt_path = \"tools/id_salt.txt\"\n",
