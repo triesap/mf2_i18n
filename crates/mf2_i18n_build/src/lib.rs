@@ -21,6 +21,7 @@ pub mod pack_encode;
 pub mod parser;
 pub mod platform;
 pub mod project;
+pub mod project_pipeline;
 pub mod validator;
 
 pub use crate::compiler::CompileError;
@@ -31,3 +32,6 @@ pub use crate::platform::{
     load_platform_bundle_manifest, write_platform_bundle_manifest,
 };
 pub use crate::project::{ProjectError, ProjectLayout, resolve_config_relative_path};
+pub use crate::project_pipeline::{
+    NativeModuleBuildError, NativeModuleBuildOptions, NativeModuleBuildOutput, build_native_module,
+};
