@@ -16,9 +16,9 @@ name = "mf2_i18n"
 
 [features]
 default = []
-runtime = ["dep:mf2_i18n_runtime"]
+runtime = ["dep:mf2_i18n_runtime", "std_backend"]
 embedded = ["dep:mf2_i18n_embedded"]
-native = ["dep:mf2_i18n_native"]
+native = ["dep:mf2_i18n_native", "runtime", "embedded"]
 build = ["dep:mf2_i18n_build"]
 std_backend = ["dep:mf2_i18n_std"]
 
