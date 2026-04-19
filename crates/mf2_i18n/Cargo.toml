@@ -1,0 +1,31 @@
+[package]
+name = "mf2_i18n"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Canonical consumer-facing facade for Unicode MessageFormat v2 (MF2) i18n."
+keywords = ["i18n", "messageformat", "localization", "unicode", "mf2"]
+categories = ["internationalization", "text-processing"]
+
+[lib]
+name = "mf2_i18n"
+
+[features]
+default = []
+runtime = ["dep:mf2_i18n_runtime"]
+embedded = ["dep:mf2_i18n_embedded"]
+native = ["dep:mf2_i18n_native"]
+build = ["dep:mf2_i18n_build"]
+std_backend = ["dep:mf2_i18n_std"]
+
+[dependencies]
+mf2_i18n_build = { workspace = true, optional = true }
+mf2_i18n_core = { workspace = true }
+mf2_i18n_embedded = { workspace = true, optional = true }
+mf2_i18n_native = { workspace = true, optional = true }
+mf2_i18n_runtime = { workspace = true, optional = true }
+mf2_i18n_std = { workspace = true, optional = true }
