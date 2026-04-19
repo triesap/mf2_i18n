@@ -1,22 +1,22 @@
 # platform consumption
 
-`mfs_i18n` supports a Rust bridge path and a generated-runtime input contract.
+`mf2_i18n` supports a Rust bridge path and a generated-runtime input contract.
 
 ## bridge runtime
 
 Use the Rust runtimes directly when the host application can call into Rust:
 
-- `mfs_i18n_runtime` for filesystem-backed loading
-- `mfs_i18n_embedded` for embedded pack delivery
-- `mfs_i18n_native` for native clients that need active locale management and preferred-locale negotiation
+- `mf2_i18n_runtime` for filesystem-backed loading
+- `mf2_i18n_embedded` for embedded pack delivery
+- `mf2_i18n_native` for native clients that need active locale management and preferred-locale negotiation
 
 This mode keeps message evaluation inside the Rust runtime surface.
 
 For locale-sensitive output on std targets:
 
-- `mfs_i18n_runtime::Runtime::format(...)` uses `mfs_i18n_std::StdFormatBackend`
-- `mfs_i18n_native::NativeLocalizer::format(...)` uses `mfs_i18n_std::StdFormatBackend`
-- `mfs_i18n_embedded::EmbeddedRuntime` requires `format_with_backend(...)`
+- `mf2_i18n_runtime::Runtime::format(...)` uses `mf2_i18n_std::StdFormatBackend`
+- `mf2_i18n_native::NativeLocalizer::format(...)` uses `mf2_i18n_std::StdFormatBackend`
+- `mf2_i18n_embedded::EmbeddedRuntime` requires `format_with_backend(...)`
 
 ## generated native runtime
 
@@ -29,7 +29,7 @@ The build output now contains:
 - `packs/*.mf2pack`
 - `platform-bundle.json`
 
-`platform-bundle.json` is the codegen entry point. It contains the runtime manifest plus the relative `id-map.json` path. Generators should load it through `mfs_i18n_build::PlatformBundle` or `load_platform_bundle_manifest(...)` instead of reading individual files ad hoc.
+`platform-bundle.json` is the codegen entry point. It contains the runtime manifest plus the relative `id-map.json` path. Generators should load it through `mf2_i18n_build::PlatformBundle` or `load_platform_bundle_manifest(...)` instead of reading individual files ad hoc.
 
 Bundle file references are bundle-local. `id-map.json` and pack paths must stay relative to the bundle root and must not use absolute paths or parent traversal.
 
