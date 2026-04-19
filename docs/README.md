@@ -2,7 +2,11 @@
 
 Documentation for `mf2_i18n`.
 
-Public tooling and project-loading integrations should target `mf2_i18n_build`, not `mf2_i18n_cli` internals.
+Most consumers should start with the feature-gated `mf2_i18n` façade. The
+lower-level crates remain available for advanced integrations, but they are not
+the default entry path.
 
-- `runtime-integration.md`: choosing between filesystem, embedded, native, and generated runtime paths
-- `platform-consumption.md`: generated-runtime bundle inputs and path rules
+- `runtime-integration.md`: choosing the canonical façade runtime feature path
+  and when to drop to expert crates
+- `platform-consumption.md`: canonical app build-script integration,
+  generated-runtime bundle inputs, and path rules
