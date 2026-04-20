@@ -8,8 +8,9 @@ use crate::error::BuildIoError;
 use crate::id_map::IdMap;
 
 pub fn write_catalog(path: &Path, catalog: &Catalog) -> Result<(), BuildIoError> {
-    let file = fs::File::create(path)?;
-    serde_json::to_writer_pretty(file, catalog)?;
+    let mut file = fs::File::create(path)?;
+    let json = serde_json::to_string_pretty(catalog)?;
+    file.write_all(json.as_bytes())?;
     Ok(())
 }
 
@@ -25,8 +26,9 @@ pub fn write_id_map_entries(
     path: &Path,
     entries: &BTreeMap<String, u32>,
 ) -> Result<(), BuildIoError> {
-    let file = fs::File::create(path)?;
-    serde_json::to_writer_pretty(file, entries)?;
+    let mut file = fs::File::create(path)?;
+    let json = serde_json::to_string_pretty(entries)?;
+    file.write_all(json.as_bytes())?;
     Ok(())
 }
 
