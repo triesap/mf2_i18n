@@ -7,7 +7,7 @@ authors.workspace = true
 repository.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Canonical consumer-facing facade for Unicode MessageFormat v2 (MF2) i18n."
+description = "Main Rust crate for Unicode MessageFormat v2 (MF2) i18n."
 keywords = ["i18n", "messageformat", "localization", "unicode", "mf2"]
 categories = ["internationalization", "text-processing"]
 

@@ -1,19 +1,19 @@
 # mf2_i18n
 
-`mf2_i18n` is the consumer-facing Rust facade for Unicode MessageFormat v2
-(MF2).
+`mf2_i18n` is the main Rust crate for Unicode MessageFormat v2 (MF2).
 
 It provides:
 
 - a `no_std` MF2 core
 - build-time compilation from `mf2_i18n.toml`
+- checked-in `id_salt.txt` project inputs
 - portable `.mf2pack` artifacts instead of runtime parsing
 - runtime surfaces for filesystem, embedded, and native hosts
 
 ## Install
 
-Most applications should start with the facade crate and enable only the
-features they need.
+Most applications should start with `mf2_i18n` and enable only the features
+they need.
 
 ```toml
 [dependencies]
@@ -72,17 +72,16 @@ This generates:
 - `mf2_i18n::NativeLocalizer`
 - `mf2_i18n::build::build_native_module(...)`
 
-## Expert Crates
+## Lower-Level Crates
 
-`mf2_i18n` is the default integration surface. If you need lower-level control,
-the workspace also exposes `mf2_i18n_core`, `mf2_i18n_runtime`,
+`mf2_i18n` is the default entry point. If you need tighter control over one
+layer, the workspace also exposes `mf2_i18n_core`, `mf2_i18n_runtime`,
 `mf2_i18n_embedded`, `mf2_i18n_native`, `mf2_i18n_build`, and
 `mf2_i18n_cli`.
 
 ## More Docs
 
-- [runtime-integration.md](docs/runtime-integration.md)
-- [platform-consumption.md](docs/platform-consumption.md)
+- [integration.md](docs/integration.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## License

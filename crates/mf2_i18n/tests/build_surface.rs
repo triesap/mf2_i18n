@@ -55,7 +55,7 @@ mod tests {
         assert!(project_root.ends_with("locales"));
 
         let default_config = ProjectConfig::default();
-        assert_eq!(default_config.project_salt_path, "tools/id_salt.txt");
+        assert_eq!(default_config.project_salt_path, "id_salt.txt");
     }
 
     #[test]
