@@ -113,12 +113,10 @@ mod tests {
     fn resolves_project_relative_paths_and_salt() {
         let root = temp_dir();
         let config_path = root.join("mf2_i18n.toml");
-        let salt_dir = root.join("tools");
-        fs::create_dir_all(&salt_dir).expect("salt dir");
-        fs::write(salt_dir.join("id_salt.txt"), "salt").expect("salt");
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\", \"shared/locales\"]\nmicro_locales_registry = \"micro-locales.toml\"\nproject_salt_path = \"tools/id_salt.txt\"\n",
+            "default_locale = \"en\"\nsource_dirs = [\"locales\", \"shared/locales\"]\nmicro_locales_registry = \"micro-locales.toml\"\nproject_salt_path = \"id_salt.txt\"\n",
         )
         .expect("config");
 

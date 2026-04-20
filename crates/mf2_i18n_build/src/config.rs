@@ -19,7 +19,7 @@ impl Default for ProjectConfig {
             default_locale: "en".to_string(),
             source_dirs: vec!["locales".to_string()],
             micro_locales_registry: Some("micro-locales.toml".to_string()),
-            project_salt_path: "tools/id_salt.txt".to_string(),
+            project_salt_path: "id_salt.txt".to_string(),
         }
     }
 }
@@ -69,7 +69,7 @@ mod tests {
 default_locale = "fr"
 source_dirs = ["locales"]
 micro_locales_registry = "micro-locales.toml"
-project_salt_path = "tools/id_salt.txt"
+project_salt_path = "id_salt.txt"
 "#;
         fs::write(&path, contents).expect("write");
         let config = load_project_config_or_default(&path).expect("config");
@@ -80,6 +80,6 @@ project_salt_path = "tools/id_salt.txt"
     #[test]
     fn default_values_are_stable() {
         let config = ProjectConfig::default();
-        assert_eq!(config.project_salt_path, "tools/id_salt.txt");
+        assert_eq!(config.project_salt_path, "id_salt.txt");
     }
 }

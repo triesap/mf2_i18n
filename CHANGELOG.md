@@ -7,4 +7,6 @@ Semantic Versioning.
 
 ## [Unreleased]
 
-- Initial repository bootstrap.
+- add a manual crates.io publishing workflow and publish script
+- simplify the public docs layout and terminology for OSS publishing
+- change the default project salt path to config-relative `id_salt.txt`

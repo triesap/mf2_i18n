@@ -248,7 +248,7 @@ mod tests {
         let config_path = dir.join("mf2_i18n.toml");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"tools/id_salt.txt\"",
+            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
         )
         .expect("config");
 
@@ -321,7 +321,7 @@ mod tests {
         let config_path = dir.join("mf2_i18n.toml");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"tools/id_salt.txt\"",
+            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
         )
         .expect("config");
 
