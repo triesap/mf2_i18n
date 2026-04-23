@@ -10,6 +10,7 @@ use crate::id_map::{IdMap, IdMapError, build_id_map};
 use crate::pack_encode::{PackBuildInput, encode_pack};
 use crate::parser::parse_message;
 use crate::project::{ProjectError, ProjectLayout};
+use crate::project_catalogs::{ProjectCatalog, ProjectCatalogError, load_project_catalogs};
 
 const DEFAULT_MODULE_MACRO_PATH: &str = "mf2_i18n::define_i18n_module!";
 const GENERATED_MODULE_FILE: &str = "generated_module.rs";
@@ -17,7 +18,7 @@ const GENERATED_CATALOG_FILE: &str = "generated_catalog.rs";
 const ID_MAP_JSON_FILE: &str = "id-map.json";
 const ID_MAP_HASH_FILE: &str = "id-map.sha256";
 
-type Catalog = BTreeMap<String, String>;
+type Catalog = ProjectCatalog;
 
 #[derive(Debug, Clone)]
 pub struct NativeModuleBuildOptions {
@@ -109,6 +110,8 @@ pub enum NativeModuleBuildError {
     #[error(transparent)]
     Project(#[from] ProjectError),
     #[error(transparent)]
+    Catalogs(#[from] ProjectCatalogError),
+    #[error(transparent)]
     IdMap(#[from] IdMapError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -120,25 +123,6 @@ pub enum NativeModuleBuildError {
     InvalidArtifactDirName(String),
     #[error("module macro path must not be empty")]
     EmptyModuleMacroPath,
-    #[error("project config must declare at least one source dir")]
-    NoSourceDirs,
-    #[error("at least one locale catalog is required")]
-    NoLocaleCatalogs,
-    #[error("default locale {0} catalog should exist")]
-    MissingDefaultLocale(String),
-    #[error("duplicate i18n message key {key} in locale {locale} from {path}")]
-    DuplicateMessageKey {
-        key: String,
-        locale: String,
-        path: PathBuf,
-    },
-    #[error(
-        "i18n catalog keys for locale {locale} do not match reference locale {reference_locale}"
-    )]
-    CatalogKeyMismatch {
-        locale: String,
-        reference_locale: String,
-    },
     #[error(
         "failed to parse i18n message for locale {locale} key {key}: {message} at {line}:{column}"
     )]
@@ -171,13 +155,14 @@ pub fn build_native_module(
     rerun_paths.insert(salt_path);
     let id_salt = project.load_project_salt()?;
 
-    let catalogs = load_catalogs(&project, &mut rerun_paths)?;
-    ensure_catalog_keys_match(&catalogs)?;
+    let loaded_catalogs = load_project_catalogs(&project)?;
+    rerun_paths.extend(loaded_catalogs.rerun_if_changed_paths().iter().cloned());
+    let catalogs = loaded_catalogs.catalogs();
 
     let default_locale = project.config().default_locale.clone();
-    let default_catalog = catalogs
-        .get(&default_locale)
-        .ok_or_else(|| NativeModuleBuildError::MissingDefaultLocale(default_locale.clone()))?;
+    let default_catalog = loaded_catalogs
+        .catalog(&default_locale)
+        .ok_or_else(|| ProjectCatalogError::MissingDefaultLocale(default_locale.clone()))?;
     let default_catalog_keys = default_catalog.keys().cloned().collect::<Vec<_>>();
 
     let id_map = build_id_map(default_catalog_keys.iter().cloned(), &id_salt)?;
@@ -191,7 +176,7 @@ pub fn build_native_module(
         .map_err(|error| std::io::Error::other(error.to_string()))?;
 
     let supported_locales = catalogs.keys().cloned().collect::<Vec<_>>();
-    for (locale, catalog) in &catalogs {
+    for (locale, catalog) in catalogs {
         let pack_bytes = compile_catalog_pack(locale, catalog, &id_map, id_map_hash)?;
         fs::write(artifact_dir.join(format!("{locale}.mf2pack")), pack_bytes)?;
     }
@@ -245,81 +230,6 @@ fn validate_options(options: &NativeModuleBuildOptions) -> Result<(), NativeModu
     Ok(())
 }
 
-fn load_catalogs(
-    project: &ProjectLayout,
-    rerun_paths: &mut BTreeSet<PathBuf>,
-) -> Result<BTreeMap<String, Catalog>, NativeModuleBuildError> {
-    let source_roots = project.source_roots();
-    if source_roots.is_empty() {
-        return Err(NativeModuleBuildError::NoSourceDirs);
-    }
-
-    let mut catalogs = BTreeMap::<String, Catalog>::new();
-    for source_root in source_roots {
-        rerun_paths.insert(source_root.clone());
-        let entries = fs::read_dir(&source_root)?;
-
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-
-            let locale = entry.file_name().to_string_lossy().into_owned();
-            let messages_path = path.join("messages.json");
-            if !messages_path.is_file() {
-                continue;
-            }
-            rerun_paths.insert(messages_path.clone());
-
-            let catalog = load_catalog(&messages_path)?;
-            let merged = catalogs.entry(locale.clone()).or_default();
-            for (key, value) in catalog {
-                if merged.insert(key.clone(), value).is_some() {
-                    return Err(NativeModuleBuildError::DuplicateMessageKey {
-                        key,
-                        locale: locale.clone(),
-                        path: messages_path.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    if catalogs.is_empty() {
-        return Err(NativeModuleBuildError::NoLocaleCatalogs);
-    }
-
-    Ok(catalogs)
-}
-
-fn load_catalog(path: &Path) -> Result<Catalog, NativeModuleBuildError> {
-    let raw = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&raw)?)
-}
-
-fn ensure_catalog_keys_match(
-    catalogs: &BTreeMap<String, Catalog>,
-) -> Result<(), NativeModuleBuildError> {
-    let Some((reference_locale, reference_catalog)) = catalogs.iter().next() else {
-        return Err(NativeModuleBuildError::NoLocaleCatalogs);
-    };
-
-    let reference_keys = reference_catalog.keys().cloned().collect::<Vec<_>>();
-    for (locale, catalog) in catalogs.iter().skip(1) {
-        let keys = catalog.keys().cloned().collect::<Vec<_>>();
-        if keys != reference_keys {
-            return Err(NativeModuleBuildError::CatalogKeyMismatch {
-                locale: locale.clone(),
-                reference_locale: reference_locale.clone(),
-            });
-        }
-    }
-
-    Ok(())
-}
-
 fn compile_catalog_pack(
     locale: &str,
     catalog: &Catalog,
@@ -328,14 +238,15 @@ fn compile_catalog_pack(
 ) -> Result<Vec<u8>, NativeModuleBuildError> {
     let mut messages = BTreeMap::new();
 
-    for (key, source) in catalog {
-        let parsed = parse_message(source).map_err(|error| NativeModuleBuildError::Parse {
-            locale: locale.to_owned(),
-            key: key.clone(),
-            message: error.message,
-            line: error.span.line,
-            column: error.span.column,
-        })?;
+    for (key, message) in catalog {
+        let parsed =
+            parse_message(&message.value).map_err(|error| NativeModuleBuildError::Parse {
+                locale: locale.to_owned(),
+                key: key.clone(),
+                message: error.message,
+                line: error.span.line,
+                column: error.span.column,
+            })?;
         let compiled =
             compile_message(&parsed).map_err(|source| NativeModuleBuildError::Compile {
                 locale: locale.to_owned(),
@@ -410,6 +321,7 @@ mod tests {
         ID_MAP_HASH_FILE, ID_MAP_JSON_FILE, NativeModuleBuildError, NativeModuleBuildOptions,
         build_native_module,
     };
+    use crate::project_catalogs::ProjectCatalogError;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -442,14 +354,14 @@ mod tests {
         fs::create_dir_all(&french_dir).expect("french locale dir");
 
         write_catalog(
-            &english_dir.join("messages.json"),
+            &english_dir.join("common.json"),
             &[
                 ("home.title", "Hi"),
                 ("home.subtitle", "Grow from the root"),
             ],
         );
         write_catalog(
-            &french_dir.join("messages.json"),
+            &french_dir.join("common.json"),
             &[
                 ("home.title", "Salut"),
                 ("home.subtitle", "Cultiver depuis la racine"),
@@ -486,7 +398,10 @@ mod tests {
         );
         assert_eq!(
             output.default_catalog_keys(),
-            &["home.subtitle".to_string(), "home.title".to_string()]
+            &[
+                "common.home.subtitle".to_string(),
+                "common.home.title".to_string()
+            ]
         );
         assert!(output.artifact_dir().join("en.mf2pack").exists());
         assert!(output.artifact_dir().join("fr.mf2pack").exists());
@@ -503,12 +418,12 @@ mod tests {
         assert!(
             output
                 .rerun_if_changed_paths()
-                .contains(&root.join("locales").join("en").join("messages.json"))
+                .contains(&root.join("locales").join("en").join("common.json"))
         );
         assert!(
             output
                 .rerun_if_changed_paths()
-                .contains(&root.join("locales").join("fr").join("messages.json"))
+                .contains(&root.join("locales").join("fr").join("common.json"))
         );
 
         let generated_module =
@@ -552,9 +467,9 @@ mod tests {
         fs::create_dir_all(&english_dir).expect("english locale dir");
         fs::create_dir_all(&french_dir).expect("french locale dir");
 
-        write_catalog(&english_dir.join("messages.json"), &[("home.title", "Hi")]);
+        write_catalog(&english_dir.join("common.json"), &[("home.title", "Hi")]);
         write_catalog(
-            &french_dir.join("messages.json"),
+            &french_dir.join("common.json"),
             &[("home.subtitle", "Salut")],
         );
         fs::write(root.join("id_salt.txt"), "salt").expect("salt");
@@ -574,8 +489,10 @@ mod tests {
         .expect_err("mismatch should fail");
         assert!(matches!(
             err,
-            NativeModuleBuildError::CatalogKeyMismatch { locale, reference_locale }
-                if locale == "fr" && reference_locale == "en"
+            NativeModuleBuildError::Catalogs(ProjectCatalogError::CatalogKeyMismatch {
+                locale,
+                reference_locale
+            }) if locale == "fr" && reference_locale == "en"
         ));
 
         fs::remove_dir_all(&root).ok();

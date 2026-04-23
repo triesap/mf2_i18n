@@ -64,7 +64,7 @@ mod tests {
         let locales_root = root.join("locales");
         let english_dir = locales_root.join("en");
         fs::create_dir_all(&english_dir).expect("english locale dir");
-        write_catalog(&english_dir.join("messages.json"), &[("home.title", "Hi")]);
+        write_catalog(&english_dir.join("common.json"), &[("home.title", "Hi")]);
         fs::write(root.join("id_salt.txt"), "salt").expect("salt");
 
         let config_path = root.join("mf2_i18n.toml");
