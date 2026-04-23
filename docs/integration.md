@@ -60,6 +60,68 @@ On std targets:
 - `EmbeddedRuntime` requires `format_with_backend(...)` for locale-sensitive
   formatting
 
+## integrate with JavaScript
+
+JavaScript apps have two supported integration paths.
+
+Use static web JSON when the app only needs literal localized strings and does
+not need the MF2 runtime in the browser:
+
+```sh
+cargo run -p mf2_i18n_cli -- export-web-json \
+  --config i18n/mf2_i18n.toml \
+  --out web-i18n \
+  --mode plain
+```
+
+This writes:
+
+- `web-i18n/messages/<locale>/<namespace>.json`
+- `web-i18n/i18n-manifest.ts`
+
+The generated TypeScript manifest exports `DEFAULT_LOCALE`,
+`SUPPORTED_LOCALES`, `MESSAGE_NAMESPACES`, and `MESSAGE_LOADERS`. Plain mode is
+intentionally limited to literal text; variables, formatters, select messages,
+and plural messages fail the export.
+
+Use the WASM runtime when browser or bundler code needs full MF2 behavior:
+
+```sh
+cargo run -p mf2_i18n_cli -- build \
+  --config i18n/mf2_i18n.toml \
+  --out i18n-runtime \
+  --release-id app-local \
+  --generated-at 2026-02-01T00:00:00Z
+scripts/package-web.sh all
+```
+
+The runtime build writes `manifest.json`, `id-map.json`, and
+`packs/<locale>.mf2pack`. `scripts/package-web.sh web` writes the browser ESM
+package to `pkg/mf2_i18n_wasm-web`; `scripts/package-web.sh bundler` writes the
+bundler ESM package to `pkg/mf2_i18n_wasm-bundler`; `all` writes both.
+
+The JavaScript runtime constructor expects one object:
+
+```ts
+import init, { Mf2Runtime } from "./pkg/mf2_i18n_wasm-web/mf2_i18n_wasm.js";
+
+await init();
+
+const runtime = Mf2Runtime.fromParts({
+  manifest,
+  idMap,
+  packs: {
+    en: enPackBytes,
+    es: esPackBytes,
+  },
+});
+```
+
+`manifest` is the parsed or stringified `manifest.json`, `idMap` is the parsed
+or binary `id-map.json`, and each pack value is a `Uint8Array` or `ArrayBuffer`
+loaded from `packs/<locale>.mf2pack`. Browser formatting uses `Intl` for plural
+selection, number formatting, date/time formatting, and currency formatting.
+
 ## generated native bundles
 
 Use `mf2_i18n::PlatformBundle` when a generator or native host consumes the

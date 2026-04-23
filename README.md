@@ -9,6 +9,8 @@ It provides:
 - checked-in `id_salt.txt` project inputs
 - portable `.mf2pack` artifacts instead of runtime parsing
 - runtime surfaces for filesystem, embedded, and native hosts
+- generated static JSON for JavaScript apps that do not run an MF2 runtime
+- browser WASM bindings for JavaScript apps that need full MF2 behavior
 
 ## Install
 
@@ -74,6 +76,40 @@ This generates:
 - `mf2_i18n::NativeLocalizer`
 - `mf2_i18n::build::build_native_module(...)`
 - `mf2_i18n::build::build_project_runtime_artifacts(...)`
+
+## Web And JavaScript
+
+Use static JSON when a JavaScript app only needs literal localized strings:
+
+```sh
+cargo run -p mf2_i18n_cli -- export-web-json \
+  --config i18n/mf2_i18n.toml \
+  --out web-i18n \
+  --mode plain
+```
+
+This writes `web-i18n/messages/<locale>/<namespace>.json` and
+`web-i18n/i18n-manifest.ts`. Plain mode rejects variables, formatters, select,
+and plural messages so the generated JSON stays directly consumable by TypeScript
+apps that do not link an MF2 runtime.
+
+Use the WASM runtime when a JavaScript app needs MF2 variables, formatters,
+selects, plurals, dates, numbers, or currencies:
+
+```sh
+cargo run -p mf2_i18n_cli -- build \
+  --config i18n/mf2_i18n.toml \
+  --out i18n-runtime \
+  --release-id app-local \
+  --generated-at 2026-02-01T00:00:00Z
+scripts/package-web.sh all
+```
+
+The build command writes `manifest.json`, `id-map.json`, and
+`packs/<locale>.mf2pack`. The package command writes local ESM packages to
+`pkg/mf2_i18n_wasm-web` and `pkg/mf2_i18n_wasm-bundler`; it does not publish to
+npm. Load those runtime artifacts into `Mf2Runtime.fromParts(...)` with
+`manifest`, `idMap`, and a locale-keyed `packs` byte map.
 
 ## Lower-Level Crates
 
