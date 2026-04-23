@@ -5,7 +5,9 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use mf2_i18n::build::{NativeModuleBuildOptions, build_native_module};
+    use mf2_i18n::build::{
+        NativeModuleBuildOptions, ProjectRuntimeBuildOptions, build_native_module,
+    };
     use mf2_i18n::{
         BuildIoError, CompileError, PlatformBundleManifest, ProjectConfig, ProjectLayout,
         load_project_config_or_default, resolve_config_relative_path,
@@ -51,6 +53,12 @@ mod tests {
         let _io_error: Option<BuildIoError> = None;
         let _layout: Option<ProjectLayout> = None;
         let _manifest: Option<PlatformBundleManifest> = None;
+        let _runtime_options = ProjectRuntimeBuildOptions::new(
+            &path,
+            std::env::temp_dir(),
+            "r1",
+            "2026-02-01T00:00:00Z",
+        );
         let project_root = resolve_config_relative_path(&path, "locales");
         assert!(project_root.ends_with("locales"));
 

@@ -5,9 +5,10 @@ pub use mf2_i18n_build::{
     BuildIoError, CompileError, NativeModuleBuildError, NativeModuleBuildOptions,
     NativeModuleBuildOutput, PlatformBundle, PlatformBundleError, PlatformBundleManifest,
     PlatformPack, ProjectCatalog, ProjectCatalogError, ProjectCatalogLoad, ProjectCatalogMessage,
-    ProjectConfig, ProjectError, ProjectLayout, build_native_module, load_platform_bundle_manifest,
-    load_project_catalogs, load_project_config, load_project_config_or_default,
-    resolve_config_relative_path, write_platform_bundle_manifest,
+    ProjectConfig, ProjectError, ProjectLayout, ProjectRuntimeBuildOptions,
+    ProjectRuntimeBuildOutput, build_native_module, build_project_runtime_artifacts,
+    load_platform_bundle_manifest, load_project_catalogs, load_project_config,
+    load_project_config_or_default, resolve_config_relative_path, write_platform_bundle_manifest,
 };
 pub use mf2_i18n_core::{
     ArgType, Args, CoreError, CoreResult, DateTimeValue, FormatBackend, FormatterId,
