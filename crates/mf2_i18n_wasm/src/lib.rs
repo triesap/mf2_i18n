@@ -5,9 +5,13 @@ use std::fmt;
 
 use js_sys::{Array, ArrayBuffer, Object, Reflect, Uint8Array};
 use mf2_i18n_core::{Args, DateTimeValue, Value};
-use mf2_i18n_runtime::{BasicFormatBackend, Manifest, Runtime, RuntimeError, RuntimeParts};
+use mf2_i18n_runtime::{Manifest, Runtime, RuntimeError, RuntimeParts};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
+
+mod intl;
+
+use intl::BrowserIntlBackend;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT_CONTRACT: &str = r#"
@@ -56,8 +60,9 @@ impl Mf2Runtime {
 
     pub fn format(&self, locale: &str, key: &str, args: JsValue) -> Result<String, JsValue> {
         let args = args_from_js(&args).map_err(binding_error)?;
+        let backend = BrowserIntlBackend::new(locale);
         self.runtime
-            .format_with_backend(locale, key, &args, &BasicFormatBackend)
+            .format_with_backend(locale, key, &args, &backend)
             .map_err(WasmBindingError::from)
             .map_err(binding_error)
     }
@@ -82,7 +87,7 @@ impl Mf2Runtime {
     ) -> Result<String, WasmBindingError> {
         let args = args_from_json(args)?;
         self.runtime
-            .format_with_backend(locale, key, &args, &BasicFormatBackend)
+            .format_with_backend(locale, key, &args, &mf2_i18n_runtime::BasicFormatBackend)
             .map_err(WasmBindingError::from)
     }
 }
