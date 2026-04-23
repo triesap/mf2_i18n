@@ -102,14 +102,13 @@ cargo run -p mf2_i18n_cli -- build \
   --out i18n-runtime \
   --release-id app-local \
   --generated-at 2026-02-01T00:00:00Z
-scripts/package-web.sh all
 ```
 
 The build command writes `manifest.json`, `id-map.json`, and
-`packs/<locale>.mf2pack`. The package command writes local ESM packages to
-`pkg/mf2_i18n_wasm-web` and `pkg/mf2_i18n_wasm-bundler`; it does not publish to
-npm. Load those runtime artifacts into `Mf2Runtime.fromParts(...)` with
-`manifest`, `idMap`, and a locale-keyed `packs` byte map.
+`packs/<locale>.mf2pack`. These files are application runtime data. Browser or
+bundler code should load them with `Mf2Runtime.fromParts(...)` from
+`@mf2-i18n/runtime`, using `manifest`, `idMap`, and a locale-keyed `packs` byte
+map.
 
 ## Lower-Level Crates
 

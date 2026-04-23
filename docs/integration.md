@@ -92,18 +92,17 @@ cargo run -p mf2_i18n_cli -- build \
   --out i18n-runtime \
   --release-id app-local \
   --generated-at 2026-02-01T00:00:00Z
-scripts/package-web.sh all
 ```
 
 The runtime build writes `manifest.json`, `id-map.json`, and
-`packs/<locale>.mf2pack`. `scripts/package-web.sh web` writes the browser ESM
-package to `pkg/mf2_i18n_wasm-web`; `scripts/package-web.sh bundler` writes the
-bundler ESM package to `pkg/mf2_i18n_wasm-bundler`; `all` writes both.
+`packs/<locale>.mf2pack`. These files are application runtime data. Browser or
+bundler code should load them with `Mf2Runtime.fromParts(...)` from
+`@mf2-i18n/runtime`.
 
 The JavaScript runtime constructor expects one object:
 
 ```ts
-import init, { Mf2Runtime } from "./pkg/mf2_i18n_wasm-web/mf2_i18n_wasm.js";
+import init, { Mf2Runtime } from "@mf2-i18n/runtime";
 
 await init();
 
