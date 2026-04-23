@@ -4,10 +4,14 @@ use thiserror::Error;
 
 use crate::command_build::{BuildCommandError, BuildOptions, run_build};
 use crate::command_coverage::{CoverageCommandError, CoverageOptions, run_coverage};
+use crate::command_export_web_json::{
+    ExportWebJsonCommandError, ExportWebJsonOptions, run_export_web_json,
+};
 use crate::command_extract::{ExtractCommandError, ExtractOptions, run_extract};
 use crate::command_pseudo::{PseudoCommandError, PseudoOptions, run_pseudo};
 use crate::command_sign::{SignCommandError, SignOptions, run_sign};
 use crate::command_validate::{ValidateCommandError, ValidateOptions, run_validate};
+use mf2_i18n_build::WebJsonMode;
 
 #[derive(Debug, Error)]
 pub enum CliAppError {
@@ -25,6 +29,8 @@ pub enum CliAppError {
     Pseudo(#[from] PseudoCommandError),
     #[error(transparent)]
     Coverage(#[from] CoverageCommandError),
+    #[error(transparent)]
+    ExportWebJson(#[from] ExportWebJsonCommandError),
 }
 
 pub fn run() -> Result<(), CliAppError> {
@@ -61,6 +67,11 @@ pub fn run() -> Result<(), CliAppError> {
         "coverage" => {
             let options = parse_coverage_options(args.collect())?;
             run_coverage(&options)?;
+            Ok(())
+        }
+        "export-web-json" => {
+            let options = parse_export_web_json_options(args.collect())?;
+            run_export_web_json(&options)?;
             Ok(())
         }
         _ => Err(CliAppError::Usage(usage())),
@@ -107,7 +118,7 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2_i18n_cli build --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>]".to_string()
+    "usage: mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2_i18n_cli build --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>]".to_string()
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
@@ -244,12 +255,38 @@ fn parse_coverage_options(args: Vec<String>) -> Result<CoverageOptions, CliAppEr
     })
 }
 
+fn parse_export_web_json_options(args: Vec<String>) -> Result<ExportWebJsonOptions, CliAppError> {
+    let mut out_dir = PathBuf::from("web-json");
+    let mut config_path = PathBuf::from("mf2_i18n.toml");
+    let mut mode = WebJsonMode::Plain;
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--out" => out_dir = PathBuf::from(next_value("--out", &mut iter)?),
+            "--config" => config_path = PathBuf::from(next_value("--config", &mut iter)?),
+            "--mode" => {
+                mode = next_value("--mode", &mut iter)?
+                    .parse()
+                    .map_err(|_| CliAppError::Usage(usage()))?
+            }
+            "--help" | "-h" => return Err(CliAppError::Usage(usage())),
+            _ => return Err(CliAppError::Usage(usage())),
+        }
+    }
+    Ok(ExportWebJsonOptions {
+        config_path,
+        out_dir,
+        mode,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_build_options, parse_coverage_options, parse_extract_options, parse_pseudo_options,
-        parse_sign_options, parse_validate_options,
+        parse_build_options, parse_coverage_options, parse_export_web_json_options,
+        parse_extract_options, parse_pseudo_options, parse_sign_options, parse_validate_options,
     };
+    use mf2_i18n_build::WebJsonMode;
 
     #[test]
     fn parses_extract_options() {
@@ -327,5 +364,18 @@ mod tests {
         ];
         let options = parse_coverage_options(args).expect("options");
         assert!(options.out_path.ends_with("coverage.json"));
+    }
+
+    #[test]
+    fn parses_export_web_json_options() {
+        let args = vec![
+            "--mode".to_string(),
+            "plain".to_string(),
+            "--out".to_string(),
+            "web-json".to_string(),
+        ];
+        let options = parse_export_web_json_options(args).expect("options");
+        assert_eq!(options.mode, WebJsonMode::Plain);
+        assert!(options.out_dir.ends_with("web-json"));
     }
 }
