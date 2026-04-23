@@ -1,13 +1,14 @@
 #[cfg(feature = "runtime")]
 mod tests {
     use mf2_i18n::{
-        Manifest, ManifestSigning, PackEntry, Runtime, RuntimeError, RuntimeResult,
+        Manifest, ManifestSigning, PackEntry, Runtime, RuntimeError, RuntimeParts, RuntimeResult,
         StdFormatBackend, parse_sha256_literal,
     };
 
     #[test]
     fn root_exports_runtime_surface() {
         let _runtime: Option<Runtime> = None;
+        let _parts: Option<RuntimeParts> = None;
         let _manifest: Option<Manifest> = None;
         let _signing: Option<ManifestSigning> = None;
         let _entry: Option<PackEntry> = None;
