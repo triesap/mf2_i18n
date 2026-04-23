@@ -38,5 +38,7 @@ pub use crate::project_catalogs::{
     load_project_catalogs,
 };
 pub use crate::project_pipeline::{
-    NativeModuleBuildError, NativeModuleBuildOptions, NativeModuleBuildOutput, build_native_module,
+    NativeModuleBuildError, NativeModuleBuildOptions, NativeModuleBuildOutput,
+    ProjectRuntimeBuildOptions, ProjectRuntimeBuildOutput, build_native_module,
+    build_project_runtime_artifacts,
 };

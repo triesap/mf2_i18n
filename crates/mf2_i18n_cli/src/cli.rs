@@ -107,7 +107,7 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2_i18n_cli build --catalog <path> --id-map-hash <path> --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>]".to_string()
+    "usage: mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2_i18n_cli build --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>]".to_string()
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
@@ -136,8 +136,6 @@ fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppEr
 }
 
 fn parse_build_options(args: Vec<String>) -> Result<BuildOptions, CliAppError> {
-    let mut catalog_path = None;
-    let mut id_map_hash_path = None;
     let mut release_id = None;
     let mut generated_at = None;
     let mut out_dir = PathBuf::from("i18n-build");
@@ -145,10 +143,6 @@ fn parse_build_options(args: Vec<String>) -> Result<BuildOptions, CliAppError> {
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--catalog" => catalog_path = Some(PathBuf::from(next_value("--catalog", &mut iter)?)),
-            "--id-map-hash" => {
-                id_map_hash_path = Some(PathBuf::from(next_value("--id-map-hash", &mut iter)?))
-            }
             "--release-id" => release_id = Some(next_value("--release-id", &mut iter)?),
             "--generated-at" => generated_at = Some(next_value("--generated-at", &mut iter)?),
             "--out" => out_dir = PathBuf::from(next_value("--out", &mut iter)?),
@@ -157,13 +151,9 @@ fn parse_build_options(args: Vec<String>) -> Result<BuildOptions, CliAppError> {
             _ => return Err(CliAppError::Usage(usage())),
         }
     }
-    let catalog_path = catalog_path.ok_or_else(|| CliAppError::Usage(usage()))?;
-    let id_map_hash_path = id_map_hash_path.ok_or_else(|| CliAppError::Usage(usage()))?;
     let release_id = release_id.ok_or_else(|| CliAppError::Usage(usage()))?;
     let generated_at = generated_at.ok_or_else(|| CliAppError::Usage(usage()))?;
     Ok(BuildOptions {
-        catalog_path,
-        id_map_hash_path,
         config_path,
         out_dir,
         release_id,
@@ -291,10 +281,6 @@ mod tests {
     #[test]
     fn parses_build_options() {
         let args = vec![
-            "--catalog".to_string(),
-            "i18n.catalog.json".to_string(),
-            "--id-map-hash".to_string(),
-            "id_map_hash".to_string(),
             "--release-id".to_string(),
             "r1".to_string(),
             "--generated-at".to_string(),

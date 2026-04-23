@@ -26,12 +26,16 @@ Main build entry points:
 
 - `mf2_i18n::build::build_native_module(...)`
 - `mf2_i18n::build::NativeModuleBuildOptions`
+- `mf2_i18n::build::build_project_runtime_artifacts(...)`
+- `mf2_i18n::build::ProjectRuntimeBuildOptions`
 
 The native-module pipeline writes:
 
+- `manifest.json`
 - `id-map.json`
 - `id-map.sha256`
-- `*.mf2pack`
+- `packs/*.mf2pack`
+- `platform-bundle.json`
 - `generated_module.rs`
 - `generated_catalog.rs`
 

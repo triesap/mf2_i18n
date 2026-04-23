@@ -60,9 +60,11 @@ fn main() {
 
 This generates:
 
+- `manifest.json`
 - `id-map.json`
 - `id-map.sha256`
-- `*.mf2pack`
+- `packs/*.mf2pack`
+- `platform-bundle.json`
 - generated Rust source that defaults to `mf2_i18n::define_i18n_module!`
 
 ## Main Entry Points
@@ -71,6 +73,7 @@ This generates:
 - `mf2_i18n::EmbeddedRuntime`
 - `mf2_i18n::NativeLocalizer`
 - `mf2_i18n::build::build_native_module(...)`
+- `mf2_i18n::build::build_project_runtime_artifacts(...)`
 
 ## Lower-Level Crates
 
