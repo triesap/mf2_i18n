@@ -24,8 +24,9 @@ pub use mf2_i18n_native::{
 };
 #[cfg(feature = "runtime")]
 pub use mf2_i18n_runtime::{
-    IdMap, Manifest, ManifestSigning, PackEntry, Runtime, RuntimeError, RuntimeResult, load_id_map,
-    load_manifest, parse_sha256, parse_sha256_literal, verify_manifest_signature,
+    IdMap, Manifest, ManifestSigning, PackEntry, Runtime, RuntimeError, RuntimeParts,
+    RuntimeResult, load_id_map, load_manifest, parse_sha256, parse_sha256_literal,
+    verify_manifest_signature,
 };
 #[cfg(feature = "std_backend")]
 pub use mf2_i18n_std::{StdFormatBackend, StdFormatError, StdFormatResolution};

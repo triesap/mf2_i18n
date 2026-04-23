@@ -1,17 +1,22 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use mf2_i18n_core::{
-    Args, CatalogChain, DateTimeValue, FormatBackend, LanguageTag, PackCatalog, PluralCategory,
-    execute, negotiate_lookup,
+    Args, CatalogChain, DateTimeValue, FormatBackend, LanguageTag, PackCatalog, PackKind,
+    PluralCategory, decode_string_pool, execute, negotiate_lookup, parse_pack_header,
+    parse_section_directory,
 };
 use mf2_i18n_std::StdFormatBackend;
 
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::id_map::IdMap;
-use crate::loader::{load_id_map, load_manifest, parse_sha256};
-use crate::manifest::PackEntry;
+use crate::loader::{load_manifest, parse_sha256};
+use crate::manifest::{Manifest, PackEntry};
+
+const MANIFEST_SCHEMA: u32 = 1;
+const PACK_SCHEMA: u32 = 0;
+const SECTION_STRING_POOL: u8 = 1;
 
 pub struct Runtime {
     id_map: IdMap,
@@ -19,6 +24,27 @@ pub struct Runtime {
     parents: BTreeMap<String, String>,
     default_locale: LanguageTag,
     supported: Vec<LanguageTag>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeParts {
+    pub manifest: Manifest,
+    pub id_map_json: Vec<u8>,
+    pub packs: BTreeMap<String, Vec<u8>>,
+}
+
+impl RuntimeParts {
+    pub fn new(
+        manifest: Manifest,
+        id_map_json: impl Into<Vec<u8>>,
+        packs: BTreeMap<String, Vec<u8>>,
+    ) -> Self {
+        Self {
+            manifest,
+            id_map_json: id_map_json.into(),
+            packs,
+        }
+    }
 }
 
 pub struct BasicFormatBackend;
@@ -154,13 +180,7 @@ impl FormatBackend for UnsupportedFormatBackend {
 impl Runtime {
     pub fn load_from_paths(manifest_path: &Path, id_map_path: &Path) -> RuntimeResult<Self> {
         let manifest = load_manifest(manifest_path)?;
-        let id_map = load_id_map(id_map_path)?;
-        let expected_hash = parse_sha256(&manifest.id_map_hash)?;
-        let actual_hash = id_map.hash()?;
-        if expected_hash != actual_hash {
-            return Err(RuntimeError::InvalidIdMap);
-        }
-
+        let id_map_json = fs::read(id_map_path)?;
         let pack_root = manifest_path
             .parent()
             .map(PathBuf::from)
@@ -168,27 +188,41 @@ impl Runtime {
 
         let mut packs = BTreeMap::new();
         for (locale, entry) in &manifest.mf2_packs {
-            let pack = load_pack(&pack_root, locale, entry, &expected_hash)?;
-            packs.insert(locale.clone(), pack);
+            packs.insert(locale.clone(), fs::read(pack_root.join(&entry.url))?);
         }
 
-        let mut parents = BTreeMap::new();
-        if let Some(micro) = &manifest.micro_locales {
-            for (child, parent) in micro {
-                parents.insert(child.clone(), parent.clone());
-            }
-        }
-        for (locale, entry) in &manifest.mf2_packs {
-            if entry.kind == "overlay" {
-                if let Some(parent) = &entry.parent {
-                    parents.insert(locale.clone(), parent.clone());
-                }
-            }
+        Self::from_parts(RuntimeParts::new(manifest, id_map_json, packs))
+    }
+
+    pub fn from_parts(parts: RuntimeParts) -> RuntimeResult<Self> {
+        validate_manifest(&parts.manifest, &parts.packs)?;
+        let id_map = IdMap::from_bytes(&parts.id_map_json)?;
+        let expected_hash = parse_sha256(&parts.manifest.id_map_hash)?;
+        let actual_hash = id_map.hash()?;
+        if expected_hash != actual_hash {
+            return Err(RuntimeError::InvalidIdMap);
         }
 
-        let default_locale = LanguageTag::parse(&manifest.default_locale)?;
+        let parents = parent_map(&parts.manifest)?;
+        let mut packs = BTreeMap::new();
+        for locale in &parts.manifest.supported_locales {
+            let normalized_locale = normalize_locale(locale)?;
+            let entry = parts
+                .manifest
+                .mf2_packs
+                .get(locale)
+                .ok_or_else(|| RuntimeError::MissingPack(locale.clone()))?;
+            let bytes = parts
+                .packs
+                .get(locale)
+                .ok_or_else(|| RuntimeError::MissingPack(locale.clone()))?;
+            let pack = load_pack_bytes(locale, entry, &expected_hash, bytes)?;
+            packs.insert(normalized_locale, pack);
+        }
+
+        let default_locale = LanguageTag::parse(&parts.manifest.default_locale)?;
         let mut supported = Vec::new();
-        for locale in &manifest.supported_locales {
+        for locale in &parts.manifest.supported_locales {
             supported.push(LanguageTag::parse(locale)?);
         }
 
@@ -254,23 +288,244 @@ impl Runtime {
     }
 }
 
-fn load_pack(
-    root: &Path,
+fn validate_manifest(manifest: &Manifest, packs: &BTreeMap<String, Vec<u8>>) -> RuntimeResult<()> {
+    if manifest.schema != MANIFEST_SCHEMA {
+        return Err(RuntimeError::InvalidManifest(format!(
+            "unsupported manifest schema {}",
+            manifest.schema
+        )));
+    }
+
+    let mut supported = BTreeSet::new();
+    for locale in &manifest.supported_locales {
+        let normalized_locale = normalize_locale(locale)?;
+        if !supported.insert(normalized_locale) {
+            return Err(RuntimeError::InvalidManifest(format!(
+                "duplicate supported locale {locale}"
+            )));
+        }
+        if !manifest.mf2_packs.contains_key(locale) {
+            return Err(RuntimeError::MissingPack(locale.clone()));
+        }
+        if !packs.contains_key(locale) {
+            return Err(RuntimeError::MissingPack(locale.clone()));
+        }
+    }
+
+    let default_locale = normalize_locale(&manifest.default_locale)?;
+    if !supported.contains(&default_locale) {
+        return Err(RuntimeError::InvalidManifest(format!(
+            "default locale {} is not supported",
+            manifest.default_locale
+        )));
+    }
+
+    for locale in manifest.mf2_packs.keys() {
+        let normalized_locale = normalize_locale(locale)?;
+        if !supported.contains(&normalized_locale) {
+            return Err(RuntimeError::InvalidManifest(format!(
+                "pack locale {locale} is not supported"
+            )));
+        }
+    }
+
+    for locale in packs.keys() {
+        if !manifest.mf2_packs.contains_key(locale) {
+            return Err(RuntimeError::UnexpectedPack(locale.clone()));
+        }
+    }
+
+    Ok(())
+}
+
+fn parent_map(manifest: &Manifest) -> RuntimeResult<BTreeMap<String, String>> {
+    let mut parents = BTreeMap::new();
+    if let Some(micro) = &manifest.micro_locales {
+        for (child, parent) in micro {
+            let child_locale = normalize_locale(child)?;
+            let parent_locale = normalize_locale(parent)?;
+            if !manifest.mf2_packs.contains_key(child) {
+                return Err(RuntimeError::InvalidManifest(format!(
+                    "micro-locale child {child} has no pack"
+                )));
+            }
+            if !manifest.mf2_packs.contains_key(parent) {
+                return Err(RuntimeError::InvalidManifest(format!(
+                    "micro-locale parent {parent} has no pack"
+                )));
+            }
+            parents.insert(child_locale, parent_locale);
+        }
+    }
+
+    for (locale, entry) in &manifest.mf2_packs {
+        let expected_kind = entry_kind(locale, &entry.kind)?;
+        let locale_tag = normalize_locale(locale)?;
+        match expected_kind {
+            PackKind::Overlay => {
+                let parent = entry.parent.as_ref().ok_or_else(|| {
+                    RuntimeError::InvalidManifest(format!(
+                        "overlay pack {locale} is missing parent"
+                    ))
+                })?;
+                if !manifest.mf2_packs.contains_key(parent) {
+                    return Err(RuntimeError::InvalidManifest(format!(
+                        "overlay parent {parent} has no pack"
+                    )));
+                }
+                let parent_tag = normalize_locale(parent)?;
+                if let Some(existing) = parents.insert(locale_tag, parent_tag.clone()) {
+                    if existing != parent_tag {
+                        return Err(RuntimeError::InvalidManifest(format!(
+                            "micro-locale parent for {locale} conflicts with pack parent"
+                        )));
+                    }
+                }
+            }
+            PackKind::Base => {
+                if entry.parent.is_some() {
+                    return Err(RuntimeError::InvalidManifest(format!(
+                        "base pack {locale} must not declare parent"
+                    )));
+                }
+            }
+            PackKind::IcuData => {}
+        }
+    }
+
+    Ok(parents)
+}
+
+fn load_pack_bytes(
     locale: &str,
     entry: &PackEntry,
     id_map_hash: &[u8; 32],
+    bytes: &[u8],
 ) -> RuntimeResult<PackCatalog> {
-    let pack_path = root.join(&entry.url);
-    let bytes = fs::read(&pack_path)?;
     if bytes.len() as u64 != entry.size {
-        return Err(RuntimeError::HashMismatch(locale.to_string()));
+        return Err(RuntimeError::PackSizeMismatch(locale.to_string()));
     }
     let expected_hash = parse_sha256(&entry.hash)?;
-    let actual_hash = sha256(&bytes);
+    let actual_hash = sha256(bytes);
     if expected_hash != actual_hash {
-        return Err(RuntimeError::HashMismatch(locale.to_string()));
+        return Err(RuntimeError::PackHashMismatch(locale.to_string()));
+    }
+    let metadata = pack_metadata(bytes)?;
+    if u32::from(metadata.schema_version) != entry.pack_schema || entry.pack_schema != PACK_SCHEMA {
+        return Err(RuntimeError::PackSchemaMismatch(locale.to_string()));
+    }
+    let expected_kind = entry_kind(locale, &entry.kind)?;
+    if metadata.kind != expected_kind {
+        return Err(RuntimeError::PackKindMismatch {
+            locale: locale.to_string(),
+            expected: pack_kind_literal(expected_kind).to_string(),
+            actual: pack_kind_literal(metadata.kind).to_string(),
+        });
+    }
+    let expected_locale = normalize_locale(locale)?;
+    let actual_locale = normalize_locale(&metadata.locale)?;
+    if actual_locale != expected_locale {
+        return Err(RuntimeError::PackLocaleMismatch {
+            expected: expected_locale,
+            actual: actual_locale,
+        });
+    }
+    let expected_parent = entry.parent.as_deref().map(normalize_locale).transpose()?;
+    let actual_parent = metadata
+        .parent
+        .as_deref()
+        .map(normalize_locale)
+        .transpose()?;
+    if actual_parent != expected_parent {
+        return Err(RuntimeError::PackParentMismatch {
+            locale: locale.to_string(),
+            expected: expected_parent,
+            actual: actual_parent,
+        });
     }
     Ok(PackCatalog::decode(&bytes, id_map_hash)?)
+}
+
+struct PackMetadata {
+    schema_version: u16,
+    kind: PackKind,
+    locale: String,
+    parent: Option<String>,
+}
+
+fn pack_metadata(bytes: &[u8]) -> RuntimeResult<PackMetadata> {
+    let (header, mut cursor) = parse_pack_header(bytes)?;
+    let section_count = read_u16(bytes, &mut cursor)? as usize;
+    let sections = parse_section_directory(bytes, cursor, section_count)?;
+    let section = sections
+        .iter()
+        .find(|section| section.section_type == SECTION_STRING_POOL)
+        .ok_or_else(|| RuntimeError::InvalidManifest("pack missing string pool".to_string()))?;
+    let start = section.offset as usize;
+    let end = start
+        .checked_add(section.length as usize)
+        .ok_or_else(|| RuntimeError::InvalidManifest("pack string pool overflow".to_string()))?;
+    if end > bytes.len() {
+        return Err(RuntimeError::InvalidManifest(
+            "pack string pool out of bounds".to_string(),
+        ));
+    }
+    let string_pool = decode_string_pool(&bytes[start..end])?;
+    let locale = string_pool
+        .get(header.locale_tag_sidx as usize)
+        .cloned()
+        .ok_or_else(|| RuntimeError::InvalidManifest("pack locale tag missing".to_string()))?;
+    let parent = header
+        .parent_tag_sidx
+        .map(|idx| {
+            string_pool
+                .get(idx as usize)
+                .cloned()
+                .ok_or_else(|| RuntimeError::InvalidManifest("pack parent tag missing".to_string()))
+        })
+        .transpose()?;
+
+    Ok(PackMetadata {
+        schema_version: header.schema_version,
+        kind: header.pack_kind,
+        locale,
+        parent,
+    })
+}
+
+fn read_u16(bytes: &[u8], cursor: &mut usize) -> RuntimeResult<u16> {
+    let end = *cursor + 2;
+    if end > bytes.len() {
+        return Err(RuntimeError::InvalidManifest(
+            "pack section count missing".to_string(),
+        ));
+    }
+    let value = u16::from_le_bytes([bytes[*cursor], bytes[*cursor + 1]]);
+    *cursor = end;
+    Ok(value)
+}
+
+fn entry_kind(locale: &str, kind: &str) -> RuntimeResult<PackKind> {
+    match kind {
+        "base" => Ok(PackKind::Base),
+        "overlay" => Ok(PackKind::Overlay),
+        "icu_data" => Ok(PackKind::IcuData),
+        _ => Err(RuntimeError::InvalidManifest(format!(
+            "unsupported pack kind {kind} for locale {locale}"
+        ))),
+    }
+}
+
+fn pack_kind_literal(kind: PackKind) -> &'static str {
+    match kind {
+        PackKind::Base => "base",
+        PackKind::Overlay => "overlay",
+        PackKind::IcuData => "icu_data",
+    }
+}
+
+fn normalize_locale(locale: &str) -> RuntimeResult<String> {
+    Ok(LanguageTag::parse(locale)?.normalized().to_string())
 }
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -282,7 +537,8 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use super::{BasicFormatBackend, Runtime};
+    use super::{BasicFormatBackend, Runtime, RuntimeParts};
+    use crate::RuntimeError;
     use crate::id_map::IdMap;
     use crate::manifest::{Manifest, PackEntry};
     use mf2_i18n_build::compiler::compile_message;
@@ -308,16 +564,22 @@ mod tests {
         path
     }
 
-    fn build_pack_bytes(id_map_hash: [u8; 32], source: &str) -> Vec<u8> {
+    fn build_pack_bytes(
+        id_map_hash: [u8; 32],
+        locale_tag: &str,
+        parent_tag: Option<&str>,
+        pack_kind: PackKind,
+        source: &str,
+    ) -> Vec<u8> {
         let message = parse_message(source).expect("parse");
         let compiled = compile_message(&message).expect("compile");
         let mut messages = BTreeMap::new();
         messages.insert(MessageId::new(0), compiled.program);
         encode_pack(&PackBuildInput {
-            pack_kind: PackKind::Base,
+            pack_kind,
             id_map_hash,
-            locale_tag: "en".to_string(),
-            parent_tag: None,
+            locale_tag: locale_tag.to_string(),
+            parent_tag: parent_tag.map(str::to_string),
             build_epoch_ms: 0,
             messages,
         })
@@ -331,6 +593,151 @@ mod tests {
         let args = Args::new();
         let output = runtime.format("en", "home.title", &args).expect("format");
         assert_eq!(output, "hi");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn runtime_from_parts_formats_message() {
+        let runtime = Runtime::from_parts(runtime_parts_fixture("home.title", "hi")).expect("load");
+        let args = Args::new();
+        let output = runtime.format("en", "home.title", &args).expect("format");
+        assert_eq!(output, "hi");
+    }
+
+    #[test]
+    fn runtime_from_parts_rejects_missing_pack() {
+        let mut parts = runtime_parts_fixture("home.title", "hi");
+        parts.packs.remove("en");
+
+        let err = runtime_from_parts_err(parts);
+        assert!(matches!(err, RuntimeError::MissingPack(locale) if locale == "en"));
+    }
+
+    #[test]
+    fn runtime_from_parts_rejects_bad_pack_hash() {
+        let mut parts = runtime_parts_fixture("home.title", "hi");
+        parts.manifest.mf2_packs.get_mut("en").expect("pack").hash =
+            format!("sha256:{}", "00".repeat(32));
+
+        let err = runtime_from_parts_err(parts);
+        assert!(matches!(err, RuntimeError::PackHashMismatch(locale) if locale == "en"));
+    }
+
+    #[test]
+    fn runtime_from_parts_rejects_bad_pack_size() {
+        let mut parts = runtime_parts_fixture("home.title", "hi");
+        parts.manifest.mf2_packs.get_mut("en").expect("pack").size += 1;
+
+        let err = runtime_from_parts_err(parts);
+        assert!(matches!(err, RuntimeError::PackSizeMismatch(locale) if locale == "en"));
+    }
+
+    #[test]
+    fn runtime_from_parts_rejects_bad_pack_schema() {
+        let mut parts = runtime_parts_fixture("home.title", "hi");
+        parts
+            .manifest
+            .mf2_packs
+            .get_mut("en")
+            .expect("pack")
+            .pack_schema = 1;
+
+        let err = runtime_from_parts_err(parts);
+        assert!(matches!(err, RuntimeError::PackSchemaMismatch(locale) if locale == "en"));
+    }
+
+    #[test]
+    fn runtime_from_parts_rejects_pack_locale_mismatch() {
+        let mut parts = runtime_parts_fixture("home.title", "hi");
+        let id_map = IdMap::from_bytes(&parts.id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let pack_bytes = build_pack_bytes(id_map_hash, "fr", None, PackKind::Base, "hi");
+        let pack = parts.manifest.mf2_packs.get_mut("en").expect("pack");
+        pack.hash = format!("sha256:{}", hex::encode(super::sha256(&pack_bytes)));
+        pack.size = pack_bytes.len() as u64;
+        parts.packs.insert("en".to_string(), pack_bytes);
+
+        let err = runtime_from_parts_err(parts);
+        assert!(matches!(
+            err,
+            RuntimeError::PackLocaleMismatch { expected, actual }
+                if expected == "en" && actual == "fr"
+        ));
+    }
+
+    #[test]
+    fn runtime_from_parts_rejects_invalid_locale_tag() {
+        let mut parts = runtime_parts_fixture("home.title", "hi");
+        parts.manifest.supported_locales.push("en_us".to_string());
+
+        let err = runtime_from_parts_err(parts);
+        assert!(
+            matches!(err, RuntimeError::Core(message) if message.contains("invalid language subtag"))
+        );
+    }
+
+    #[test]
+    fn runtime_from_parts_supports_micro_locale_parent_pack() {
+        let id_map_json = r#"{"home.title": 0}"#.as_bytes().to_vec();
+        let id_map = IdMap::from_bytes(&id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let base_bytes = build_pack_bytes(id_map_hash, "en", None, PackKind::Base, "base");
+        let overlay_bytes = build_pack_bytes(
+            id_map_hash,
+            "en-x-test",
+            Some("en"),
+            PackKind::Overlay,
+            "test",
+        );
+        let mut mf2_packs = BTreeMap::new();
+        mf2_packs.insert(
+            "en".to_string(),
+            pack_entry("base", "en", None, &base_bytes),
+        );
+        mf2_packs.insert(
+            "en-x-test".to_string(),
+            pack_entry("overlay", "en-x-test", Some("en"), &overlay_bytes),
+        );
+        let mut micro_locales = BTreeMap::new();
+        micro_locales.insert("en-x-test".to_string(), "en".to_string());
+        let mut packs = BTreeMap::new();
+        packs.insert("en".to_string(), base_bytes);
+        packs.insert("en-x-test".to_string(), overlay_bytes);
+        let manifest = Manifest {
+            schema: 1,
+            release_id: "r1".to_string(),
+            generated_at: "2026-02-01T00:00:00Z".to_string(),
+            default_locale: "en".to_string(),
+            supported_locales: vec!["en".to_string(), "en-x-test".to_string()],
+            id_map_hash: format!("sha256:{}", hex::encode(id_map_hash)),
+            mf2_packs,
+            icu_packs: None,
+            micro_locales: Some(micro_locales),
+            budgets: None,
+            signing: None,
+        };
+
+        let runtime =
+            Runtime::from_parts(RuntimeParts::new(manifest, id_map_json, packs)).expect("runtime");
+        let output = runtime
+            .format_with_backend("en-x-test", "home.title", &Args::new(), &BasicFormatBackend)
+            .expect("format");
+        assert_eq!(output, "test");
+    }
+
+    #[test]
+    fn load_from_paths_reuses_in_memory_validation() {
+        let root = temp_dir();
+        let mut parts = runtime_parts_fixture("home.title", "hi");
+        parts.manifest.mf2_packs.get_mut("en").expect("pack").size += 1;
+        let (manifest_path, id_map_path) = write_runtime_parts(&root, &parts);
+
+        let err = match Runtime::load_from_paths(&manifest_path, &id_map_path) {
+            Ok(_) => panic!("runtime should fail"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, RuntimeError::PackSizeMismatch(locale) if locale == "en"));
 
         fs::remove_dir_all(&root).ok();
     }
@@ -558,30 +965,22 @@ mod tests {
     }
 
     fn write_runtime_fixture(root: &PathBuf, key: &str, source: &str) -> Runtime {
-        let packs_dir = root.join("packs");
-        fs::create_dir_all(&packs_dir).expect("packs");
+        let parts = runtime_parts_fixture(key, source);
+        let (manifest_path, id_map_path) = write_runtime_parts(root, &parts);
 
-        let id_map_json = format!(r#"{{"{key}": 0}}"#);
-        let id_map = IdMap::from_json(&id_map_json).expect("id map");
+        Runtime::load_from_paths(&manifest_path, &id_map_path).expect("runtime")
+    }
+
+    fn runtime_parts_fixture(key: &str, source: &str) -> RuntimeParts {
+        let id_map_json = format!(r#"{{"{key}": 0}}"#).into_bytes();
+        let id_map = IdMap::from_bytes(&id_map_json).expect("id map");
         let id_map_hash = id_map.hash().expect("hash");
-        let pack_bytes = build_pack_bytes(id_map_hash, source);
-        let pack_path = packs_dir.join("en.mf2pack");
-        fs::write(&pack_path, &pack_bytes).expect("write pack");
-
+        let pack_bytes = build_pack_bytes(id_map_hash, "en", None, PackKind::Base, source);
         let mut mf2_packs = BTreeMap::new();
         mf2_packs.insert(
             "en".to_string(),
-            PackEntry {
-                kind: "base".to_string(),
-                url: "packs/en.mf2pack".to_string(),
-                hash: format!("sha256:{}", hex::encode(super::sha256(&pack_bytes))),
-                size: pack_bytes.len() as u64,
-                content_encoding: "identity".to_string(),
-                pack_schema: 0,
-                parent: None,
-            },
+            pack_entry("base", "en", None, &pack_bytes),
         );
-
         let manifest = Manifest {
             schema: 1,
             release_id: "r1".to_string(),
@@ -595,17 +994,45 @@ mod tests {
             budgets: None,
             signing: None,
         };
+        let mut packs = BTreeMap::new();
+        packs.insert("en".to_string(), pack_bytes);
+        RuntimeParts::new(manifest, id_map_json, packs)
+    }
 
+    fn write_runtime_parts(root: &PathBuf, parts: &RuntimeParts) -> (PathBuf, PathBuf) {
+        let packs_dir = root.join("packs");
+        fs::create_dir_all(&packs_dir).expect("packs");
+        for (locale, bytes) in &parts.packs {
+            fs::write(packs_dir.join(format!("{locale}.mf2pack")), bytes).expect("write pack");
+        }
         let manifest_path = root.join("manifest.json");
         fs::write(
             &manifest_path,
-            serde_json::to_string_pretty(&manifest).expect("json"),
+            serde_json::to_string_pretty(&parts.manifest).expect("json"),
         )
         .expect("write manifest");
 
         let id_map_path = root.join("id_map.json");
-        fs::write(&id_map_path, id_map_json).expect("write id map");
+        fs::write(&id_map_path, &parts.id_map_json).expect("write id map");
+        (manifest_path, id_map_path)
+    }
 
-        Runtime::load_from_paths(&manifest_path, &id_map_path).expect("runtime")
+    fn pack_entry(kind: &str, locale: &str, parent: Option<&str>, bytes: &[u8]) -> PackEntry {
+        PackEntry {
+            kind: kind.to_string(),
+            url: format!("packs/{locale}.mf2pack"),
+            hash: format!("sha256:{}", hex::encode(super::sha256(bytes))),
+            size: bytes.len() as u64,
+            content_encoding: "identity".to_string(),
+            pack_schema: 0,
+            parent: parent.map(str::to_string),
+        }
+    }
+
+    fn runtime_from_parts_err(parts: RuntimeParts) -> RuntimeError {
+        match Runtime::from_parts(parts) {
+            Ok(_) => panic!("runtime should fail"),
+            Err(err) => err,
+        }
     }
 }
