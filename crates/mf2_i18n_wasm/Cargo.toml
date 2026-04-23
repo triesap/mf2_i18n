@@ -13,6 +13,14 @@ categories = ["internationalization", "text-processing"]
 
 [lib]
 name = "mf2_i18n_wasm"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+js-sys = "0.3.91"
+serde_json = { workspace = true }
+wasm-bindgen = "0.2.114"
+mf2_i18n_core = { workspace = true }
 mf2_i18n_runtime = { workspace = true }
+
+[dev-dependencies]
+mf2_i18n_build = { workspace = true }
