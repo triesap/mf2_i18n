@@ -567,7 +567,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir() -> PathBuf {
         let mut path = std::env::temp_dir();
@@ -575,7 +578,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        path.push(format!("mf2_i18n_runtime_{nanos}"));
+        let sequence = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        path.push(format!("mf2_i18n_runtime_{nanos}_{sequence}"));
         fs::create_dir_all(&path).expect("dir");
         path
     }
