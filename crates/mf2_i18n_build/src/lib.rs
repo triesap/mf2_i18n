@@ -65,8 +65,9 @@ pub use crate::web_json::{
     WebJsonModeParseError, WebJsonUnsupportedKind, build_plain_json_web_target, export_web_json,
 };
 pub use crate::web_metadata::{
-    WebMessageArg, WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
-    infer_web_message_args, render_web_typescript_metadata_types,
+    HybridMessageDelivery, HybridMessagePlan, HybridMessageRoute, WebMessageArg,
+    WebMessageMetadata, WebMessageMetadataError, classify_hybrid_messages,
+    collect_web_message_metadata, infer_web_message_args, render_web_typescript_metadata_types,
 };
 pub use crate::web_runtime::{
     RuntimeWebAssets, RuntimeWebBuildError, RuntimeWebBuildOptions, RuntimeWebBuildOutput,

@@ -15,6 +15,27 @@ pub struct WebMessageMetadata {
     pub args: Vec<WebMessageArg>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HybridMessageDelivery {
+    StaticJson,
+    Runtime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HybridMessageRoute {
+    pub id: String,
+    pub namespace: String,
+    pub message_path: String,
+    pub delivery: HybridMessageDelivery,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HybridMessagePlan {
+    pub static_messages: Vec<HybridMessageRoute>,
+    pub runtime_messages: Vec<HybridMessageRoute>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebMessageArg {
     pub name: String,
@@ -62,6 +83,45 @@ pub fn infer_web_message_args(message: &Message) -> Vec<WebMessageArg> {
             required: true,
         })
         .collect()
+}
+
+pub fn classify_hybrid_messages(
+    locale: &str,
+    catalog: &ProjectCatalog,
+    namespace_filter: Option<&[String]>,
+) -> Result<HybridMessagePlan, WebMessageMetadataError> {
+    let mut static_messages = Vec::new();
+    let mut runtime_messages = Vec::new();
+
+    for message in catalog.values() {
+        if namespace_filter.is_some_and(|values| !values.contains(&message.namespace)) {
+            continue;
+        }
+        let parsed =
+            parse_message(&message.value).map_err(|error| WebMessageMetadataError::Parse {
+                locale: locale.to_owned(),
+                key: message.qualified_key.clone(),
+                message: error.message,
+                line: error.span.line,
+                column: error.span.column,
+            })?;
+        let delivery = hybrid_delivery_for_message(&parsed);
+        let route = HybridMessageRoute {
+            id: message.qualified_key.clone(),
+            namespace: message.namespace.clone(),
+            message_path: message.message_path.clone(),
+            delivery,
+        };
+        match delivery {
+            HybridMessageDelivery::StaticJson => static_messages.push(route),
+            HybridMessageDelivery::Runtime => runtime_messages.push(route),
+        }
+    }
+
+    Ok(HybridMessagePlan {
+        static_messages,
+        runtime_messages,
+    })
 }
 
 pub fn render_web_typescript_metadata_types(
@@ -133,6 +193,18 @@ fn infer_segments(segments: &[Segment], args: &mut BTreeMap<String, ArgType>) {
             Segment::Expr(Expr::Variable(var)) => infer_variable(var, args),
             Segment::Expr(Expr::Select(select)) => infer_select(select, args),
         }
+    }
+}
+
+fn hybrid_delivery_for_message(message: &Message) -> HybridMessageDelivery {
+    if message
+        .segments
+        .iter()
+        .all(|segment| matches!(segment, Segment::Text { .. }))
+    {
+        HybridMessageDelivery::StaticJson
+    } else {
+        HybridMessageDelivery::Runtime
     }
 }
 
@@ -223,7 +295,10 @@ fn json_string(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_web_message_metadata, infer_web_message_args};
+    use super::{
+        HybridMessageDelivery, classify_hybrid_messages, collect_web_message_metadata,
+        infer_web_message_args,
+    };
     use crate::model::ArgType;
     use crate::parser::parse_message;
     use crate::project_catalogs::{ProjectCatalog, ProjectCatalogMessage};
@@ -334,5 +409,60 @@ mod tests {
         assert!(types.contains("export type MessageId"));
         assert!(types.contains("\"common.count\""));
         assert!(types.contains("readonly \"count\": number"));
+    }
+
+    #[test]
+    fn classifies_hybrid_static_and_runtime_messages() {
+        let mut catalog = ProjectCatalog::new();
+        catalog.insert(
+            "common.title".to_string(),
+            ProjectCatalogMessage {
+                namespace: "common".to_string(),
+                message_path: "title".to_string(),
+                qualified_key: "common.title".to_string(),
+                value: "Welcome".to_string(),
+                source_path: PathBuf::from("locales/en/common.mf2"),
+                line: Some(1),
+            },
+        );
+        catalog.insert(
+            "common.count".to_string(),
+            ProjectCatalogMessage {
+                namespace: "common".to_string(),
+                message_path: "count".to_string(),
+                qualified_key: "common.count".to_string(),
+                value: "{ $count :plural -> [one] {One item} *[other] {{ $count :number } items} }"
+                    .to_string(),
+                source_path: PathBuf::from("locales/en/common.mf2"),
+                line: Some(2),
+            },
+        );
+        catalog.insert(
+            "docs.hidden".to_string(),
+            ProjectCatalogMessage {
+                namespace: "docs".to_string(),
+                message_path: "hidden".to_string(),
+                qualified_key: "docs.hidden".to_string(),
+                value: "Hidden".to_string(),
+                source_path: PathBuf::from("locales/en/docs.mf2"),
+                line: Some(1),
+            },
+        );
+
+        let plan =
+            classify_hybrid_messages("en", &catalog, Some(&["common".to_string()])).expect("plan");
+
+        assert_eq!(plan.static_messages.len(), 1);
+        assert_eq!(plan.static_messages[0].id, "common.title");
+        assert_eq!(
+            plan.static_messages[0].delivery,
+            HybridMessageDelivery::StaticJson
+        );
+        assert_eq!(plan.runtime_messages.len(), 1);
+        assert_eq!(plan.runtime_messages[0].id, "common.count");
+        assert_eq!(
+            plan.runtime_messages[0].delivery,
+            HybridMessageDelivery::Runtime
+        );
     }
 }
