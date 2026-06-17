@@ -44,6 +44,7 @@ export function resolveRustCli(options = {}, runtime = {}) {
       command: path,
       args: [],
       cwd,
+      projectCwd: cwd,
       attempts,
     };
   }
@@ -73,6 +74,7 @@ export function resolveRustCli(options = {}, runtime = {}) {
       command: env.CARGO ?? 'cargo',
       args: ['run', '--manifest-path', manifestPath, '-p', 'mf2_i18n_cli', '--'],
       cwd: dirname(manifestPath),
+      projectCwd: cwd,
       attempts,
     };
   }
@@ -86,6 +88,7 @@ export function formatResolution(resolution) {
     `strategy: ${resolution.strategy}`,
     `command: ${resolution.command}${args}`,
     `cwd: ${resolution.cwd}`,
+    `project cwd: ${resolution.projectCwd}`,
   ].join('\n');
 }
 

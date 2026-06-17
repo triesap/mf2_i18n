@@ -1,4 +1,5 @@
 import {spawn} from 'node:child_process';
+import {resolve} from 'node:path';
 import {
   CliResolutionError,
   formatResolution,
@@ -100,7 +101,12 @@ export async function runCli(argv, io, runtime = {}) {
       return 0;
     }
     const resolution = resolveRustCli(parsed.options, runtime);
-    return await runRustCli(resolution, buildWebArgs(parsed.command, parsed.options), io, runtime);
+    return await runRustCli(
+      resolution,
+      buildWebArgs(parsed.command, parsed.options, resolution.projectCwd),
+      io,
+      runtime,
+    );
   } catch (error) {
     if (error instanceof CliUsageError) {
       io.stderr.write(`${error.message}\n\n${usage()}\n`);
@@ -114,10 +120,16 @@ export async function runCli(argv, io, runtime = {}) {
   }
 }
 
-export function buildWebArgs(command, options) {
-  const args = ['build-web', '--target', options.target, '--config', options.config];
+export function buildWebArgs(command, options, projectCwd = process.cwd()) {
+  const args = [
+    'build-web',
+    '--target',
+    options.target,
+    '--config',
+    resolve(projectCwd, options.config),
+  ];
   if (options.out) {
-    args.push('--out', options.out);
+    args.push('--out', resolve(projectCwd, options.out));
   }
   if (command === 'check-web' || options.check) {
     args.push('--check');

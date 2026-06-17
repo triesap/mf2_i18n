@@ -1,0 +1,12 @@
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "plain-site"
+mode = "plain-json"
+framework = "vanilla"
+out_dir = "generated/mf2"
+locales = ["en", "es"]
+namespaces = ["home"]
+stale_policy = "fail"
