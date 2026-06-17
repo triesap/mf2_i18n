@@ -118,13 +118,17 @@ Supported target modes:
   the browser
 - `runtime`: full MF2 runtime artifacts, packs, TypeScript metadata, and
   generated browser loader helpers
+- `hybrid`: literal messages as static JSON plus lazy MF2 runtime packs for
+  variables, formatters, selects, plurals, dates, numbers, and currencies
 - `docusaurus`: Docusaurus-native `i18n/<locale>/code.json`, theme
   translation JSON, docs plugin metadata, localized MDX, and generated React
   page message metadata
 
 Plain JSON mode rejects variables, formatters, select, and plural messages.
 Runtime mode supports MF2 variables, formatters, selects, plurals, dates,
-numbers, and currencies through generated loaders and `mf2_i18n_wasm`.
+numbers, and currencies through generated loaders and `mf2_i18n_wasm`. Hybrid
+mode exposes one generated TypeScript API while routing literal messages to
+static JSON and loading runtime packs only for dynamic messages.
 
 For Docusaurus:
 

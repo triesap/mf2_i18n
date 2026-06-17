@@ -187,6 +187,76 @@ or binary `id-map.json`, and each pack value is a `Uint8Array` or `ArrayBuffer`
 loaded from `packs/<locale>.mf2pack`. Browser formatting uses `Intl` for plural
 selection, number formatting, date/time formatting, and currency formatting.
 
+### hybrid target
+
+Use `hybrid` when an app has a mix of literal copy and dynamic MF2 messages but
+should expose one generated localization API to application code:
+
+```toml
+[[web.targets]]
+name = "app-hybrid"
+mode = "hybrid"
+framework = "vite"
+out_dir = "src/generated/mf2"
+locales = ["en", "es"]
+namespaces = ["home", "checkout"]
+release_id = "app-local"
+generated_at = "2026-02-01T00:00:00Z"
+stale_policy = "fail"
+```
+
+Generated outputs include:
+
+- `mf2-web-manifest.json`
+- `hybrid-assets.json`
+- `runtime-assets.json`
+- `manifest.json`
+- `platform-bundle.json`
+- `id-map.json`
+- `id-map.sha256`
+- `metadata.json`
+- `packs/<locale>.mf2pack`
+- `messages/<locale>/<namespace>.json`
+- `types.ts`
+- `loaders.ts`
+- `index.ts`
+
+The generator classifies each default-locale message. Literal messages without
+arguments are written to static JSON. Messages with variables, formatters,
+selects, plurals, dates, numbers, or currencies are routed through the runtime
+pack path.
+
+Generated TypeScript includes `MessageId`, `ArgsFor<K>`, locale and namespace
+unions, `HYBRID_ASSETS`, `RUNTIME_ASSETS`, `STATIC_MESSAGE_LOADERS`,
+`isStaticMessage(...)`, `isRuntimeMessage(...)`, `loadStaticMessages(...)`,
+`loadRuntimeParts(...)`, `createMf2Runtime(...)`, and one async `format(...)`.
+
+Application code passes the WASM runtime class only to the generated surface:
+
+```ts
+import init, { Mf2Runtime } from "./mf2_i18n_wasm";
+import { format } from "./generated/mf2";
+
+await init();
+
+const title = await format(Mf2Runtime, "home.title", {}, { locales: "es" });
+const count = await format(
+  Mf2Runtime,
+  "checkout.itemCount",
+  { count: 3 },
+  { locales: ["es-MX", "es"] },
+);
+```
+
+Static messages load through generated JSON imports. Runtime assets are fetched
+and cached only when a dynamic message is formatted.
+
+Use hybrid instead of maintaining separate `plain-json` and `runtime` targets
+for the same application surface. Migration should collapse app code onto the
+hybrid `format(...)` call, delete duplicate app-local loader branches, keep one
+checked-in generated output directory, and verify it with
+`build-web --target <name> --check`.
+
 ### Docusaurus target
 
 Use `docusaurus` when a Docusaurus site should keep Docusaurus-native locale
@@ -243,9 +313,11 @@ Migration steps:
    `mf2_i18n_cli build-web --target <name>`.
 3. Replace app-local TypeScript loader handwork with generated `types.ts`,
    `loaders.ts`, and `index.ts`.
-4. For Docusaurus, delete custom code-json and localized-MDX sync scripts and
+4. For mixed literal and dynamic web copy, use one `hybrid` target instead of
+   separate plain/runtime outputs for the same UI.
+5. For Docusaurus, delete custom code-json and localized-MDX sync scripts and
    let `build-web --target docs` write Docusaurus-native outputs.
-5. Add `build-web --target <name> --check` to CI or local verification when the
+6. Add `build-web --target <name> --check` to CI or local verification when the
    generated outputs are checked in.
 
 ### downstream Docusaurus proof
