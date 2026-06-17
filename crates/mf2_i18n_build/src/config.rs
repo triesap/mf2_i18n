@@ -90,8 +90,8 @@ pub enum WebTargetConfigError {
     EmptyLocale { target: String },
     #[error("web target {target} namespace entries must not be empty")]
     EmptyNamespace { target: String },
-    #[error("web target {target} uses deferred mode hybrid")]
-    DeferredHybridMode { target: String },
+    #[error("web target {target} hybrid mode does not support docusaurus framework")]
+    HybridDocusaurusFramework { target: String },
     #[error("web target {target} docusaurus mode requires docs_source_dir")]
     MissingDocusaurusDocsSourceDir { target: String },
     #[error("web target {target} docusaurus mode requires docusaurus_i18n_dir")]
@@ -181,11 +181,22 @@ impl WebTargetConfig {
 
         match self.mode {
             WebTargetMode::PlainJson | WebTargetMode::Runtime => Ok(()),
-            WebTargetMode::Hybrid => Err(WebTargetConfigError::DeferredHybridMode {
-                target: self.name.clone(),
-            }),
+            WebTargetMode::Hybrid => self.validate_hybrid(),
             WebTargetMode::Docusaurus => self.validate_docusaurus(),
         }
+    }
+
+    fn validate_hybrid(&self) -> Result<(), WebTargetConfigError> {
+        if self
+            .framework
+            .is_some_and(|framework| matches!(framework, WebFramework::Docusaurus))
+        {
+            return Err(WebTargetConfigError::HybridDocusaurusFramework {
+                target: self.name.clone(),
+            });
+        }
+
+        Ok(())
     }
 
     fn validate_docusaurus(&self) -> Result<(), WebTargetConfigError> {
@@ -400,7 +411,7 @@ docusaurus_i18n_dir = "i18n"
     }
 
     #[test]
-    fn keeps_hybrid_mode_deferred() {
+    fn accepts_hybrid_mode_for_web_frameworks() {
         let path = temp_path("web_hybrid");
         fs::write(
             &path,
@@ -412,17 +423,47 @@ project_salt_path = "id_salt.txt"
 [[web.targets]]
 name = "app"
 mode = "hybrid"
+framework = "vite"
 out_dir = "src/generated/mf2"
 "#,
         )
         .expect("write");
 
         let config = load_project_config_or_default(&path).expect("config");
-        let err = config.validate_web_targets().expect_err("hybrid");
+        let target = config.web.target("app").expect("target");
+        assert_eq!(target.mode, WebTargetMode::Hybrid);
+        assert!(config.validate_web_targets().is_ok());
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_hybrid_docusaurus_framework() {
+        let path = temp_path("web_hybrid_docusaurus");
+        fs::write(
+            &path,
+            r#"
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "docs"
+mode = "hybrid"
+framework = "docusaurus"
+out_dir = "src/generated/mf2"
+"#,
+        )
+        .expect("write");
+
+        let config = load_project_config_or_default(&path).expect("config");
+        let err = config
+            .validate_web_targets()
+            .expect_err("hybrid docusaurus");
         assert_eq!(
             err,
-            WebTargetConfigError::DeferredHybridMode {
-                target: "app".to_string()
+            WebTargetConfigError::HybridDocusaurusFramework {
+                target: "docs".to_string()
             }
         );
 
