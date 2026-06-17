@@ -252,15 +252,23 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_dir() -> PathBuf {
-        let mut path = std::env::temp_dir();
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_name(prefix: &str) -> String {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        path.push(format!("mf2_i18n_platform_{nanos}"));
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}_{nanos}_{counter}", prefix, std::process::id())
+    }
+
+    fn temp_dir() -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(temp_name("mf2_i18n_platform"));
         fs::create_dir_all(&path).expect("dir");
         path
     }
@@ -418,11 +426,8 @@ mod tests {
     fn rejects_absolute_id_map_path() {
         let root = temp_dir();
         let outside_id_map_path = std::env::temp_dir().join(format!(
-            "mf2_i18n_platform_abs_id_map_{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
+            "{}.json",
+            temp_name("mf2_i18n_platform_abs_id_map")
         ));
         fs::write(&outside_id_map_path, br#"{"home.title":0}"#).expect("outside id map");
 
@@ -473,11 +478,8 @@ mod tests {
     fn rejects_absolute_pack_path() {
         let root = temp_dir();
         let outside_pack_path = std::env::temp_dir().join(format!(
-            "mf2_i18n_platform_abs_pack_{}.mf2pack",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
+            "{}.mf2pack",
+            temp_name("mf2_i18n_platform_abs_pack")
         ));
 
         let (valid_bundle_manifest_path, pack_bytes) = write_valid_bundle_fixture(&root);
