@@ -8,8 +8,13 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::parser::{Expr, Message, Segment, SelectKind, parse_message};
-use crate::project::{ProjectError, ProjectLayout};
+use crate::project::{ProjectError, ProjectLayout, resolve_config_relative_path};
 use crate::project_catalogs::{ProjectCatalog, ProjectCatalogError, ProjectCatalogMessage};
+use crate::web::{
+    WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
+    WebArtifactWriteOutput, write_web_artifacts,
+};
+use crate::{WebStalePolicy, WebTargetConfig, WebTargetConfigError, WebTargetMode};
 
 const MESSAGES_DIR: &str = "messages";
 const TYPESCRIPT_MANIFEST_FILE: &str = "i18n-manifest.ts";
@@ -75,6 +80,51 @@ impl WebJsonExportOptions {
 
     pub fn mode(&self) -> WebJsonMode {
         self.mode
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlainJsonWebBuildOptions {
+    config_path: PathBuf,
+    target_name: String,
+    out_dir_override: Option<PathBuf>,
+    check: bool,
+}
+
+impl PlainJsonWebBuildOptions {
+    pub fn new(config_path: impl Into<PathBuf>, target_name: impl Into<String>) -> Self {
+        Self {
+            config_path: config_path.into(),
+            target_name: target_name.into(),
+            out_dir_override: None,
+            check: false,
+        }
+    }
+
+    pub fn with_out_dir(mut self, out_dir: impl Into<PathBuf>) -> Self {
+        self.out_dir_override = Some(out_dir.into());
+        self
+    }
+
+    pub fn with_check(mut self, check: bool) -> Self {
+        self.check = check;
+        self
+    }
+
+    pub fn config_path(&self) -> &Path {
+        &self.config_path
+    }
+
+    pub fn target_name(&self) -> &str {
+        &self.target_name
+    }
+
+    pub fn out_dir_override(&self) -> Option<&Path> {
+        self.out_dir_override.as_deref()
+    }
+
+    pub fn check(&self) -> bool {
+        self.check
     }
 }
 
@@ -150,6 +200,32 @@ impl WebJsonExportOutput {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PlainJsonWebBuildOutput {
+    artifact_output: WebArtifactWriteOutput,
+    default_locale: String,
+    supported_locales: Vec<String>,
+    namespaces: Vec<String>,
+}
+
+impl PlainJsonWebBuildOutput {
+    pub fn artifact_output(&self) -> &WebArtifactWriteOutput {
+        &self.artifact_output
+    }
+
+    pub fn default_locale(&self) -> &str {
+        &self.default_locale
+    }
+
+    pub fn supported_locales(&self) -> &[String] {
+        &self.supported_locales
+    }
+
+    pub fn namespaces(&self) -> &[String] {
+        &self.namespaces
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebJsonUnsupportedKind {
     Variable,
@@ -209,10 +285,29 @@ pub enum WebJsonExportError {
     },
 }
 
+#[derive(Debug, Error)]
+pub enum PlainJsonWebBuildError {
+    #[error(transparent)]
+    Project(#[from] ProjectError),
+    #[error(transparent)]
+    Config(#[from] WebTargetConfigError),
+    #[error(transparent)]
+    Catalogs(#[from] ProjectCatalogError),
+    #[error(transparent)]
+    Export(#[from] WebJsonExportError),
+    #[error(transparent)]
+    Artifacts(#[from] WebArtifactError),
+    #[error("missing web target {0}")]
+    MissingTarget(String),
+    #[error("web target {target} must use plain-json mode")]
+    UnsupportedTargetMode { target: String },
+}
+
 struct PendingMessageFile {
     locale: String,
     namespace: String,
     path: PathBuf,
+    relative_path: PathBuf,
     bytes: Vec<u8>,
 }
 
@@ -269,6 +364,79 @@ pub fn export_web_json(
     })
 }
 
+pub fn build_plain_json_web_target(
+    options: &PlainJsonWebBuildOptions,
+) -> Result<PlainJsonWebBuildOutput, PlainJsonWebBuildError> {
+    let project = ProjectLayout::load_or_default(options.config_path())?;
+    project.config().validate_web_targets()?;
+    let target = project
+        .config()
+        .web
+        .target(options.target_name())
+        .ok_or_else(|| PlainJsonWebBuildError::MissingTarget(options.target_name().to_owned()))?;
+    if target.mode != WebTargetMode::PlainJson {
+        return Err(PlainJsonWebBuildError::UnsupportedTargetMode {
+            target: target.name.clone(),
+        });
+    }
+
+    let loaded_catalogs = crate::project_catalogs::load_project_catalogs(&project)?;
+    let pending = build_plain_pending_export_for_target(
+        project.config().default_locale.as_str(),
+        loaded_catalogs.catalogs(),
+        target,
+    )?;
+    let mut artifact_files = pending
+        .files
+        .iter()
+        .map(|file| WebArtifactFile::new(&file.relative_path, file.bytes.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    artifact_files.push(WebArtifactFile::new(
+        "types.ts",
+        render_plain_typescript_types(
+            &pending.default_locale,
+            &pending.supported_locales,
+            &pending.namespaces,
+        )
+        .into_bytes(),
+    )?);
+    artifact_files.push(WebArtifactFile::new(
+        "loaders.ts",
+        render_plain_typescript_loaders(&pending.supported_locales, &pending.namespaces)
+            .into_bytes(),
+    )?);
+    artifact_files.push(WebArtifactFile::new(
+        "index.ts",
+        b"export * from \"./types\";\nexport * from \"./loaders\";\n".to_vec(),
+    )?);
+
+    let out_dir = options
+        .out_dir_override()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolve_config_relative_path(options.config_path(), &target.out_dir));
+    let artifact_output = write_web_artifacts(
+        &WebArtifactWriteOptions::new(out_dir)
+            .with_stale_policy(target.stale_policy.unwrap_or(WebStalePolicy::Fail))
+            .with_check(options.check()),
+        &WebArtifactManifestInput {
+            target: target.name.clone(),
+            mode: target.mode,
+            framework: target.framework,
+            default_locale: pending.default_locale.clone(),
+            supported_locales: pending.supported_locales.clone(),
+            namespaces: pending.namespaces.clone(),
+        },
+        artifact_files,
+    )?;
+
+    Ok(PlainJsonWebBuildOutput {
+        artifact_output,
+        default_locale: pending.default_locale,
+        supported_locales: pending.supported_locales,
+        namespaces: pending.namespaces,
+    })
+}
+
 fn build_pending_export(
     default_locale: &str,
     catalogs: &BTreeMap<String, ProjectCatalog>,
@@ -285,12 +453,42 @@ fn build_plain_pending_export(
     catalogs: &BTreeMap<String, ProjectCatalog>,
     out_dir: &Path,
 ) -> Result<PendingExport, WebJsonExportError> {
+    build_plain_pending_export_inner(default_locale, catalogs, out_dir, None, None)
+}
+
+fn build_plain_pending_export_for_target(
+    default_locale: &str,
+    catalogs: &BTreeMap<String, ProjectCatalog>,
+    target: &WebTargetConfig,
+) -> Result<PendingExport, WebJsonExportError> {
+    build_plain_pending_export_inner(
+        default_locale,
+        catalogs,
+        Path::new(""),
+        (!target.locales.is_empty()).then_some(target.locales.as_slice()),
+        (!target.namespaces.is_empty()).then_some(target.namespaces.as_slice()),
+    )
+}
+
+fn build_plain_pending_export_inner(
+    default_locale: &str,
+    catalogs: &BTreeMap<String, ProjectCatalog>,
+    out_dir: &Path,
+    locale_filter: Option<&[String]>,
+    namespace_filter: Option<&[String]>,
+) -> Result<PendingExport, WebJsonExportError> {
     let supported_locales = catalogs.keys().cloned().collect::<Vec<_>>();
     let mut namespaces = BTreeSet::new();
     let mut namespace_maps = BTreeMap::<(String, String), Map<String, Value>>::new();
 
     for (locale, catalog) in catalogs {
+        if locale_filter.is_some_and(|values| !values.contains(locale)) {
+            continue;
+        }
         for message in catalog.values() {
+            if namespace_filter.is_some_and(|values| !values.contains(&message.namespace)) {
+                continue;
+            }
             let text = plain_text_message(locale, message)?;
             namespaces.insert(message.namespace.clone());
             let namespace_map = namespace_maps
@@ -301,16 +499,24 @@ fn build_plain_pending_export(
     }
 
     let namespaces = namespaces.into_iter().collect::<Vec<_>>();
+    let supported_locales = match locale_filter {
+        Some(values) => values.to_vec(),
+        None => supported_locales,
+    };
     let messages_dir = out_dir.join(MESSAGES_DIR);
     let mut files = Vec::new();
     for ((locale, namespace), map) in namespace_maps {
-        let path = messages_dir.join(&locale).join(format!("{namespace}.json"));
+        let relative_path = Path::new(MESSAGES_DIR)
+            .join(&locale)
+            .join(format!("{namespace}.json"));
+        let path = out_dir.join(&relative_path);
         let mut bytes = serde_json::to_vec_pretty(&Value::Object(map))?;
         bytes.push(b'\n');
         files.push(PendingMessageFile {
             locale,
             namespace,
             path,
+            relative_path,
             bytes,
         });
     }
@@ -469,6 +675,44 @@ fn render_typescript_manifest(
     )
 }
 
+fn render_plain_typescript_types(
+    default_locale: &str,
+    supported_locales: &[String],
+    namespaces: &[String],
+) -> String {
+    format!(
+        "export const DEFAULT_LOCALE = {} as const;\nexport const SUPPORTED_LOCALES = [{}] as const;\nexport type Locale = typeof SUPPORTED_LOCALES[number];\nexport const MESSAGE_NAMESPACES = [{}] as const;\nexport type Namespace = typeof MESSAGE_NAMESPACES[number];\nexport type PlainJsonMessages = Record<string, unknown>;\n",
+        json_string(default_locale),
+        render_string_array(supported_locales),
+        render_string_array(namespaces),
+    )
+}
+
+fn render_plain_typescript_loaders(supported_locales: &[String], namespaces: &[String]) -> String {
+    let mut loader_entries = Vec::new();
+    for locale in supported_locales {
+        for namespace in namespaces {
+            let import_path = format!("./{MESSAGES_DIR}/{locale}/{namespace}.json");
+            loader_entries.push(format!(
+                "  {{\n    locale: {},\n    namespace: {},\n    loader: async () => (await import({})).default as PlainJsonMessages,\n  }}",
+                json_string(locale),
+                json_string(namespace),
+                json_string(&import_path)
+            ));
+        }
+    }
+    let loaders = if loader_entries.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}\n", loader_entries.join(",\n"))
+    };
+
+    format!(
+        "import type {{ Locale, Namespace, PlainJsonMessages }} from \"./types\";\n\nexport const MESSAGE_LOADERS = [{}] as const;\n\nexport async function loadMessages(locale: Locale, namespace: Namespace): Promise<PlainJsonMessages> {{\n  const entry = MESSAGE_LOADERS.find((loader) => loader.locale === locale && loader.namespace === namespace);\n  if (!entry) {{\n    throw new Error(`missing MF2 messages for ${{locale}}/${{namespace}}`);\n  }}\n  return entry.loader();\n}}\n",
+        loaders,
+    )
+}
+
 fn render_string_array(values: &[String]) -> String {
     values
         .iter()
@@ -484,9 +728,10 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        WebJsonExportError, WebJsonExportOptions, WebJsonMode, WebJsonUnsupportedKind,
-        export_web_json,
+        PlainJsonWebBuildOptions, WebJsonExportError, WebJsonExportOptions, WebJsonMode,
+        WebJsonUnsupportedKind, build_plain_json_web_target, export_web_json,
     };
+    use crate::web::WEB_ARTIFACT_MANIFEST_FILE;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -507,6 +752,16 @@ mod tests {
         fs::write(
             &config_path,
             "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n",
+        )
+        .expect("config");
+        config_path
+    }
+
+    fn write_web_config(root: &Path) -> PathBuf {
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"docs\"\nmode = \"plain-json\"\nframework = \"docusaurus\"\nout_dir = \"web-generated\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"common\"]\nstale_policy = \"fail\"\n",
         )
         .expect("config");
         config_path
@@ -567,6 +822,40 @@ mod tests {
         assert!(manifest.contains("export const MESSAGE_NAMESPACES = [\"common\", \"products\"]"));
         assert!(manifest.contains("import(\"./messages/en/common.json\")"));
         assert!(manifest.contains("import(\"./messages/es/products.json\")"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn builds_plain_json_web_target_artifacts() {
+        let root = temp_dir("plain_target");
+        write_locale(&root, "en", "Hi", "Coffee");
+        write_locale(&root, "es", "Hola", "Cafe");
+        let config_path = write_web_config(&root);
+
+        let output =
+            build_plain_json_web_target(&PlainJsonWebBuildOptions::new(&config_path, "docs"))
+                .expect("build");
+        let out_dir = root.join("web-generated");
+
+        assert_eq!(output.default_locale(), "en");
+        assert_eq!(
+            output.supported_locales(),
+            &["en".to_string(), "es".to_string()]
+        );
+        assert_eq!(output.namespaces(), &["common".to_string()]);
+        assert_eq!(output.artifact_output().manifest().target, "docs");
+        assert!(out_dir.join(WEB_ARTIFACT_MANIFEST_FILE).exists());
+        assert!(out_dir.join("messages/en/common.json").exists());
+        assert!(!out_dir.join("messages/en/products.json").exists());
+
+        let types = fs::read_to_string(out_dir.join("types.ts")).expect("types");
+        assert!(types.contains("export type Locale"));
+        assert!(types.contains("export type Namespace"));
+
+        let loaders = fs::read_to_string(out_dir.join("loaders.ts")).expect("loaders");
+        assert!(loaders.contains("loadMessages"));
+        assert!(loaders.contains("messages/en/common.json"));
 
         fs::remove_dir_all(&root).ok();
     }
