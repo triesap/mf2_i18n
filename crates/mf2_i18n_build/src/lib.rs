@@ -27,6 +27,7 @@ pub mod validator;
 pub mod web;
 pub mod web_json;
 pub mod web_metadata;
+pub mod web_runtime;
 
 pub use crate::compiler::CompileError;
 pub use crate::config::{
@@ -60,5 +61,9 @@ pub use crate::web_json::{
 };
 pub use crate::web_metadata::{
     WebMessageArg, WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
-    infer_web_message_args,
+    infer_web_message_args, render_web_typescript_metadata_types,
+};
+pub use crate::web_runtime::{
+    RuntimeWebAssets, RuntimeWebBuildError, RuntimeWebBuildOptions, RuntimeWebBuildOutput,
+    RuntimeWebPackAsset, build_runtime_web_target,
 };

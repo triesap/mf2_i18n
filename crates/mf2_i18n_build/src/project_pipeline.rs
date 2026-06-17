@@ -33,6 +33,8 @@ pub struct ProjectRuntimeBuildOptions {
     out_dir: PathBuf,
     release_id: String,
     generated_at: String,
+    locale_filter: Vec<String>,
+    namespace_filter: Vec<String>,
 }
 
 impl ProjectRuntimeBuildOptions {
@@ -47,7 +49,27 @@ impl ProjectRuntimeBuildOptions {
             out_dir: out_dir.into(),
             release_id: release_id.into(),
             generated_at: generated_at.into(),
+            locale_filter: Vec::new(),
+            namespace_filter: Vec::new(),
         }
+    }
+
+    pub fn with_locales<I, S>(mut self, locales: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.locale_filter = locales.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn with_namespaces<I, S>(mut self, namespaces: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.namespace_filter = namespaces.into_iter().map(Into::into).collect();
+        self
     }
 
     pub fn config_path(&self) -> &Path {
@@ -64,6 +86,14 @@ impl ProjectRuntimeBuildOptions {
 
     pub fn generated_at(&self) -> &str {
         &self.generated_at
+    }
+
+    pub fn locale_filter(&self) -> &[String] {
+        &self.locale_filter
+    }
+
+    pub fn namespace_filter(&self) -> &[String] {
+        &self.namespace_filter
     }
 }
 
@@ -303,7 +333,11 @@ pub fn build_project_runtime_artifacts(
     let id_salt = project.load_project_salt()?;
     let loaded_catalogs = load_project_catalogs(&project)?;
     rerun_paths.extend(loaded_catalogs.rerun_if_changed_paths().iter().cloned());
-    let catalogs = loaded_catalogs.catalogs();
+    let catalogs = filter_runtime_catalogs(
+        loaded_catalogs.catalogs(),
+        options.locale_filter(),
+        options.namespace_filter(),
+    );
     let micro_locale_map = project
         .micro_locales_registry_path()
         .map(|path| {
@@ -314,8 +348,8 @@ pub fn build_project_runtime_artifacts(
         .unwrap_or_default();
 
     let default_locale = project.config().default_locale.clone();
-    let default_catalog = loaded_catalogs
-        .catalog(&default_locale)
+    let default_catalog = catalogs
+        .get(&default_locale)
         .ok_or_else(|| ProjectCatalogError::MissingDefaultLocale(default_locale.clone()))?;
     let default_catalog_keys = default_catalog.keys().cloned().collect::<Vec<_>>();
 
@@ -337,7 +371,7 @@ pub fn build_project_runtime_artifacts(
     fs::create_dir_all(&packs_dir)?;
     let mut mf2_packs = BTreeMap::new();
     let mut micro_locales = BTreeMap::new();
-    for (locale, catalog) in catalogs {
+    for (locale, catalog) in &catalogs {
         let parent = micro_locale_map.get(locale).cloned();
         let pack_kind = if parent.is_some() {
             mf2_i18n_core::PackKind::Overlay
@@ -409,6 +443,28 @@ pub fn build_project_runtime_artifacts(
         supported_locales,
         default_catalog_keys,
     })
+}
+
+fn filter_runtime_catalogs(
+    catalogs: &BTreeMap<String, ProjectCatalog>,
+    locale_filter: &[String],
+    namespace_filter: &[String],
+) -> BTreeMap<String, ProjectCatalog> {
+    let mut filtered = BTreeMap::new();
+    for (locale, catalog) in catalogs {
+        if !locale_filter.is_empty() && !locale_filter.contains(locale) {
+            continue;
+        }
+        let messages = catalog
+            .iter()
+            .filter(|(_, message)| {
+                namespace_filter.is_empty() || namespace_filter.contains(&message.namespace)
+            })
+            .map(|(key, message)| (key.clone(), message.clone()))
+            .collect::<ProjectCatalog>();
+        filtered.insert(locale.clone(), messages);
+    }
+    filtered
 }
 
 pub fn build_native_module(
@@ -578,7 +634,10 @@ fn render_generated_catalog(
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeModuleBuildError, NativeModuleBuildOptions, build_native_module};
+    use super::{
+        NativeModuleBuildError, NativeModuleBuildOptions, ProjectRuntimeBuildOptions,
+        build_native_module, build_project_runtime_artifacts,
+    };
     use crate::platform::PlatformBundle;
     use crate::project_catalogs::ProjectCatalogError;
     use std::fs;
@@ -626,6 +685,47 @@ mod tests {
                 ("home.subtitle", "Cultiver depuis la racine"),
             ],
         );
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n",
+        )
+        .expect("config");
+        config_path
+    }
+
+    fn write_filtered_project_fixture(root: &Path) -> PathBuf {
+        let locales_root = root.join("locales");
+        let english_dir = locales_root.join("en");
+        let spanish_dir = locales_root.join("es");
+        let french_dir = locales_root.join("fr");
+        fs::create_dir_all(&english_dir).expect("english locale dir");
+        fs::create_dir_all(&spanish_dir).expect("spanish locale dir");
+        fs::create_dir_all(&french_dir).expect("french locale dir");
+
+        write_catalog(
+            &english_dir.join("common.json"),
+            &[("home.title", "Hi"), ("cart.count", "{ $count :number }")],
+        );
+        write_catalog(&english_dir.join("admin.json"), &[("panel.title", "Admin")]);
+        write_catalog(
+            &spanish_dir.join("common.json"),
+            &[("home.title", "Hola"), ("cart.count", "{ $count :number }")],
+        );
+        write_catalog(
+            &spanish_dir.join("admin.json"),
+            &[("panel.title", "Administracion")],
+        );
+        write_catalog(
+            &french_dir.join("common.json"),
+            &[
+                ("home.title", "Salut"),
+                ("cart.count", "{ $count :number }"),
+            ],
+        );
+        write_catalog(&french_dir.join("admin.json"), &[("panel.title", "Admin")]);
         fs::write(root.join("id_salt.txt"), "salt").expect("salt");
 
         let config_path = root.join("mf2_i18n.toml");
@@ -713,6 +813,46 @@ mod tests {
         assert!(generated_catalog.contains("DEFAULT_LOCALE_ID"));
         assert!(generated_catalog.contains("\"fr\""));
         assert!(generated_catalog.contains("\"common.home.title\""));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn runtime_artifacts_support_locale_and_namespace_filters() {
+        let root = temp_dir("runtime_filter");
+        let config_path = write_filtered_project_fixture(&root);
+        let out_dir = root.join("runtime");
+
+        let output = build_project_runtime_artifacts(
+            &ProjectRuntimeBuildOptions::new(
+                &config_path,
+                &out_dir,
+                "runtime-filter",
+                "2026-02-01T00:00:00Z",
+            )
+            .with_locales(["en", "es"])
+            .with_namespaces(["common"]),
+        )
+        .expect("build");
+
+        assert_eq!(
+            output.supported_locales(),
+            &["en".to_string(), "es".to_string()]
+        );
+        assert_eq!(
+            output.default_catalog_keys(),
+            &[
+                "common.cart.count".to_string(),
+                "common.home.title".to_string()
+            ]
+        );
+        assert!(output.packs_dir().join("en.mf2pack").exists());
+        assert!(output.packs_dir().join("es.mf2pack").exists());
+        assert!(!output.packs_dir().join("fr.mf2pack").exists());
+
+        let id_map_json = fs::read_to_string(output.id_map_path()).expect("id map");
+        assert!(id_map_json.contains("\"common.home.title\""));
+        assert!(!id_map_json.contains("\"admin.panel.title\""));
 
         fs::remove_dir_all(&root).ok();
     }

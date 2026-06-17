@@ -15,7 +15,8 @@ use crate::web::{
     WebArtifactWriteOutput, write_web_artifacts,
 };
 use crate::web_metadata::{
-    WebMessageArg, WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
+    WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
+    render_web_typescript_metadata_types,
 };
 use crate::{WebStalePolicy, WebTargetConfig, WebTargetConfigError, WebTargetMode};
 
@@ -715,71 +716,15 @@ fn render_plain_typescript_types(
     namespaces: &[String],
     message_metadata: &[WebMessageMetadata],
 ) -> String {
-    let message_ids = if message_metadata.is_empty() {
-        "never".to_string()
-    } else {
-        message_metadata
-            .iter()
-            .map(|message| format!("  | {}", json_string(&message.id)))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let message_args = if message_metadata.is_empty() {
-        "Record<never, never>".to_string()
-    } else {
-        let entries = message_metadata
-            .iter()
-            .map(|message| {
-                format!(
-                    "  {}: {};",
-                    json_string(&message.id),
-                    render_message_args_type(&message.args)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!("{{\n{entries}\n}}")
-    };
-
     format!(
-        "export const DEFAULT_LOCALE = {} as const;\nexport const SUPPORTED_LOCALES = [{}] as const;\nexport type Locale = typeof SUPPORTED_LOCALES[number];\nexport const MESSAGE_NAMESPACES = [{}] as const;\nexport type Namespace = typeof MESSAGE_NAMESPACES[number];\nexport type MessageId =\n{};\nexport type MessageArgsById = {};\nexport type ArgsFor<TMessageId extends MessageId> = MessageArgsById[TMessageId];\nexport type PlainJsonMessages = Record<string, unknown>;\n",
-        json_string(default_locale),
-        render_string_array(supported_locales),
-        render_string_array(namespaces),
-        message_ids,
-        message_args,
+        "{}export type PlainJsonMessages = Record<string, unknown>;\n",
+        render_web_typescript_metadata_types(
+            default_locale,
+            supported_locales,
+            namespaces,
+            message_metadata
+        )
     )
-}
-
-fn render_message_args_type(args: &[WebMessageArg]) -> String {
-    if args.is_empty() {
-        "undefined".to_string()
-    } else {
-        let entries = args
-            .iter()
-            .map(|arg| {
-                format!(
-                    "    readonly {}: {};",
-                    json_string(&arg.name),
-                    render_arg_type(&arg.arg_type)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!("{{\n{entries}\n  }}")
-    }
-}
-
-fn render_arg_type(arg_type: &crate::model::ArgType) -> &'static str {
-    match arg_type {
-        crate::model::ArgType::String => "string",
-        crate::model::ArgType::Number => "number",
-        crate::model::ArgType::Bool => "boolean",
-        crate::model::ArgType::DateTime => "Date | string | number",
-        crate::model::ArgType::Unit => "{ readonly value: number; readonly unit: string }",
-        crate::model::ArgType::Currency => "{ readonly value: number; readonly currency: string }",
-        crate::model::ArgType::Any => "unknown",
-    }
 }
 
 fn render_plain_typescript_loaders(supported_locales: &[String], namespaces: &[String]) -> String {
