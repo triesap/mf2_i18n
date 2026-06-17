@@ -64,6 +64,48 @@ pub fn infer_web_message_args(message: &Message) -> Vec<WebMessageArg> {
         .collect()
 }
 
+pub fn render_web_typescript_metadata_types(
+    default_locale: &str,
+    supported_locales: &[String],
+    namespaces: &[String],
+    message_metadata: &[WebMessageMetadata],
+) -> String {
+    let message_ids = if message_metadata.is_empty() {
+        "never".to_string()
+    } else {
+        message_metadata
+            .iter()
+            .map(|message| format!("  | {}", json_string(&message.id)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let message_args = if message_metadata.is_empty() {
+        "Record<never, never>".to_string()
+    } else {
+        let entries = message_metadata
+            .iter()
+            .map(|message| {
+                format!(
+                    "  {}: {};",
+                    json_string(&message.id),
+                    render_message_args_type(&message.args)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{{\n{entries}\n}}")
+    };
+
+    format!(
+        "export const DEFAULT_LOCALE = {} as const;\nexport const SUPPORTED_LOCALES = [{}] as const;\nexport type Locale = typeof SUPPORTED_LOCALES[number];\nexport const MESSAGE_NAMESPACES = [{}] as const;\nexport type Namespace = typeof MESSAGE_NAMESPACES[number];\nexport type MessageId =\n{};\nexport type MessageArgsById = {};\nexport type ArgsFor<TMessageId extends MessageId> = MessageArgsById[TMessageId];\n",
+        json_string(default_locale),
+        render_string_array(supported_locales),
+        render_string_array(namespaces),
+        message_ids,
+        message_args,
+    )
+}
+
 fn metadata_for_message(
     locale: &str,
     message: &ProjectCatalogMessage,
@@ -134,6 +176,49 @@ fn formatter_arg_type(formatter: &str) -> ArgType {
         "identity" => ArgType::Any,
         _ => ArgType::Any,
     }
+}
+
+fn render_message_args_type(args: &[WebMessageArg]) -> String {
+    if args.is_empty() {
+        "undefined".to_string()
+    } else {
+        let entries = args
+            .iter()
+            .map(|arg| {
+                format!(
+                    "    readonly {}: {};",
+                    json_string(&arg.name),
+                    render_arg_type(&arg.arg_type)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{{\n{entries}\n  }}")
+    }
+}
+
+fn render_arg_type(arg_type: &ArgType) -> &'static str {
+    match arg_type {
+        ArgType::String => "string",
+        ArgType::Number => "number",
+        ArgType::Bool => "boolean",
+        ArgType::DateTime => "Date | string | number",
+        ArgType::Unit => "{ readonly value: number; readonly unit: string }",
+        ArgType::Currency => "{ readonly value: number; readonly currency: string }",
+        ArgType::Any => "unknown",
+    }
+}
+
+fn render_string_array(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| json_string(value))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn json_string(value: &str) -> String {
+    serde_json::to_string(value).expect("string serialization should not fail")
 }
 
 #[cfg(test)]
@@ -224,5 +309,30 @@ mod tests {
 
         let err = collect_web_message_metadata("en", &catalog, None).expect_err("parse error");
         assert!(err.to_string().contains("locale en key common.bad"));
+    }
+
+    #[test]
+    fn renders_typescript_metadata_contract() {
+        let metadata = vec![super::WebMessageMetadata {
+            id: "common.count".to_string(),
+            namespace: "common".to_string(),
+            message_path: "count".to_string(),
+            args: vec![super::WebMessageArg {
+                name: "count".to_string(),
+                arg_type: ArgType::Number,
+                required: true,
+            }],
+        }];
+
+        let types = super::render_web_typescript_metadata_types(
+            "en",
+            &["en".to_string(), "es".to_string()],
+            &["common".to_string()],
+            &metadata,
+        );
+
+        assert!(types.contains("export type MessageId"));
+        assert!(types.contains("\"common.count\""));
+        assert!(types.contains("readonly \"count\": number"));
     }
 }
