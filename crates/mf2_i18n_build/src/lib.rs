@@ -25,6 +25,7 @@ pub mod project_catalogs;
 pub mod project_pipeline;
 pub mod validator;
 pub mod web;
+pub mod web_docusaurus;
 pub mod web_json;
 pub mod web_metadata;
 pub mod web_runtime;
@@ -53,6 +54,10 @@ pub use crate::web::{
     WEB_ARTIFACT_MANIFEST_FILE, WEB_ARTIFACT_MANIFEST_SCHEMA, WebArtifactError, WebArtifactFile,
     WebArtifactManifest, WebArtifactManifestFile, WebArtifactManifestInput,
     WebArtifactWriteOptions, WebArtifactWriteOutput, write_web_artifacts,
+};
+pub use crate::web_docusaurus::{
+    DocusaurusWebBuildError, DocusaurusWebBuildOptions, DocusaurusWebBuildOutput,
+    build_docusaurus_web_target,
 };
 pub use crate::web_json::{
     PlainJsonWebBuildError, PlainJsonWebBuildOptions, PlainJsonWebBuildOutput, WebJsonExportError,

@@ -40,6 +40,8 @@ pub struct WebTargetConfig {
     #[serde(default)]
     pub docusaurus_i18n_dir: Option<String>,
     #[serde(default)]
+    pub docusaurus_sidebar_id: Option<String>,
+    #[serde(default)]
     pub generated_at: Option<String>,
     #[serde(default)]
     pub release_id: Option<String>,
@@ -94,6 +96,8 @@ pub enum WebTargetConfigError {
     MissingDocusaurusDocsSourceDir { target: String },
     #[error("web target {target} docusaurus mode requires docusaurus_i18n_dir")]
     MissingDocusaurusI18nDir { target: String },
+    #[error("web target {target} docusaurus_sidebar_id must not be empty when provided")]
+    EmptyDocusaurusSidebarId { target: String },
     #[error(
         "web target {target} docusaurus mode must use docusaurus framework when framework is set"
     )]
@@ -201,6 +205,16 @@ impl WebTargetConfig {
             .is_none_or(|value| value.trim().is_empty())
         {
             return Err(WebTargetConfigError::MissingDocusaurusI18nDir {
+                target: self.name.clone(),
+            });
+        }
+
+        if self
+            .docusaurus_sidebar_id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(WebTargetConfigError::EmptyDocusaurusSidebarId {
                 target: self.name.clone(),
             });
         }

@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use mf2_i18n_build::{
-    PlainJsonWebBuildError, PlainJsonWebBuildOptions, ProjectError, ProjectLayout,
-    RuntimeWebBuildError, RuntimeWebBuildOptions, WebTargetConfigError, WebTargetMode,
+    DocusaurusWebBuildError, DocusaurusWebBuildOptions, PlainJsonWebBuildError,
+    PlainJsonWebBuildOptions, ProjectError, ProjectLayout, RuntimeWebBuildError,
+    RuntimeWebBuildOptions, WebTargetConfigError, WebTargetMode, build_docusaurus_web_target,
     build_plain_json_web_target, build_runtime_web_target,
 };
 use thiserror::Error;
@@ -17,6 +18,8 @@ pub enum BuildWebCommandError {
     PlainJson(#[from] PlainJsonWebBuildError),
     #[error(transparent)]
     Runtime(#[from] RuntimeWebBuildError),
+    #[error(transparent)]
+    Docusaurus(#[from] DocusaurusWebBuildError),
     #[error("missing web target {0}")]
     MissingTarget(String),
     #[error("web target {target} mode is not supported by build-web yet")]
@@ -63,7 +66,18 @@ pub fn run_build_web(options: &BuildWebOptions) -> Result<(), BuildWebCommandErr
 
             build_runtime_web_target(&build_options)?;
         }
-        WebTargetMode::Docusaurus | WebTargetMode::Hybrid => {
+        WebTargetMode::Docusaurus => {
+            let mut build_options =
+                DocusaurusWebBuildOptions::new(&options.config_path, &options.target_name)
+                    .with_check(options.check);
+
+            if let Some(out_dir) = &options.out_dir {
+                build_options = build_options.with_out_dir(out_dir);
+            }
+
+            build_docusaurus_web_target(&build_options)?;
+        }
+        WebTargetMode::Hybrid => {
             return Err(BuildWebCommandError::UnsupportedTargetMode {
                 target: target.name.clone(),
             });
@@ -184,6 +198,67 @@ generated_at = "2026-02-01T00:00:00Z"
         assert!(out_dir.join("runtime-assets.json").exists());
         assert!(out_dir.join("packs/en.mf2pack").exists());
         assert!(out_dir.join("loaders.ts").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn builds_docusaurus_web_target() {
+        let dir = temp_dir();
+        for locale in ["en", "es"] {
+            fs::create_dir_all(dir.join("locales").join(locale)).expect("locale");
+        }
+        fs::write(dir.join("id_salt.txt"), "salt").expect("salt");
+        fs::create_dir_all(dir.join("docs")).expect("docs");
+        fs::write(dir.join("docs/intro.mdx"), "# Intro\n").expect("doc");
+        fs::write(dir.join("locales/en/home.mf2"), "title = Docs\n").expect("home en");
+        fs::write(dir.join("locales/es/home.mf2"), "title = Documentos\n").expect("home es");
+        fs::write(
+            dir.join("locales/en/docs.mf2"),
+            "intro = ---\ntitle: Intro\n---\n# Intro\n",
+        )
+        .expect("docs en");
+        fs::write(
+            dir.join("locales/es/docs.mf2"),
+            "intro = ---\ntitle: Intro\n---\n# Intro ES\n",
+        )
+        .expect("docs es");
+
+        let config_path = dir.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "docs"
+mode = "docusaurus"
+framework = "docusaurus"
+out_dir = "generated"
+docs_source_dir = "docs"
+docusaurus_i18n_dir = "i18n"
+locales = ["en", "es"]
+namespaces = ["home", "docs"]
+"#,
+        )
+        .expect("config");
+
+        run_build_web(&BuildWebOptions {
+            config_path,
+            target_name: "docs".to_string(),
+            out_dir: None,
+            check: false,
+        })
+        .expect("build");
+
+        assert!(dir.join("generated/messages.ts").exists());
+        assert!(dir.join("i18n/es/code.json").exists());
+        assert!(
+            dir.join("i18n/es/docusaurus-plugin-content-docs/current/intro.mdx")
+                .exists()
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
