@@ -20,7 +20,7 @@ use crate::web::{
 use crate::web_json::{WebJsonExportError, insert_nested_message, plain_text_message};
 use crate::web_metadata::{
     HybridMessagePlan, WebMessageMetadata, WebMessageMetadataError, classify_hybrid_messages,
-    collect_web_message_metadata,
+    collect_web_message_metadata, render_web_typescript_metadata_types,
 };
 use crate::web_runtime::{RuntimeWebAssets, RuntimeWebPackAsset};
 use crate::{WebStalePolicy, WebTargetConfigError, WebTargetMode};
@@ -240,6 +240,13 @@ pub fn build_hybrid_web_target(
             .map(|route| route.id.clone())
             .collect(),
     };
+    let static_namespaces = message_plan
+        .static_messages
+        .iter()
+        .map(|route| route.namespace.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
 
     let mut artifact_files = runtime_artifact_files(temp_dir.path(), &runtime_assets)?;
     artifact_files.extend(static_message_files(
@@ -259,6 +266,30 @@ pub fn build_hybrid_web_target(
     artifact_files.push(WebArtifactFile::new(
         "metadata.json",
         json_bytes(&message_metadata)?,
+    )?);
+    artifact_files.push(WebArtifactFile::new(
+        "types.ts",
+        render_hybrid_types(
+            runtime_output.default_locale(),
+            runtime_output.supported_locales(),
+            &namespaces,
+            &message_metadata,
+        )
+        .into_bytes(),
+    )?);
+    artifact_files.push(WebArtifactFile::new(
+        "loaders.ts",
+        render_hybrid_loaders(
+            &hybrid_assets,
+            &runtime_assets,
+            runtime_output.supported_locales(),
+            &static_namespaces,
+        )?
+        .into_bytes(),
+    )?);
+    artifact_files.push(WebArtifactFile::new(
+        "index.ts",
+        b"export * from \"./types\";\nexport * from \"./loaders\";\n".to_vec(),
     )?);
 
     let out_dir = options
@@ -405,6 +436,271 @@ fn insert_static_message(
     Ok(())
 }
 
+fn render_hybrid_types(
+    default_locale: &str,
+    supported_locales: &[String],
+    namespaces: &[String],
+    message_metadata: &[WebMessageMetadata],
+) -> String {
+    format!(
+        "{}export type StaticMessages = Record<string, unknown>;\nexport type Mf2RuntimeArg = string | number | boolean | {{ readonly type: \"datetime\"; readonly unixMilliseconds: number }} | {{ readonly type: \"datetime\"; readonly unixSeconds: number }} | {{ readonly type: \"currency\"; readonly value: number; readonly code: string }};\nexport type Mf2RuntimeArgs = Record<string, Mf2RuntimeArg>;\nexport type RuntimeWebPackAsset = {{ readonly locale: Locale; readonly url: string; readonly kind: string; readonly hash: string; readonly size: number; readonly parent?: Locale }};\nexport type RuntimeWebAssets = {{ readonly schema: number; readonly target: string; readonly mode: \"runtime\" | \"hybrid\"; readonly defaultLocale: Locale; readonly supportedLocales: readonly Locale[]; readonly manifest: string; readonly platformBundle: string; readonly idMap: string; readonly idMapHash: string; readonly metadata: string; readonly packs: readonly RuntimeWebPackAsset[] }};\nexport type HybridWebAssets = {{ readonly schema: number; readonly target: string; readonly mode: \"hybrid\"; readonly defaultLocale: Locale; readonly supportedLocales: readonly Locale[]; readonly staticMessagesRoot: string; readonly runtimeAssets: string; readonly metadata: string; readonly staticMessageIds: readonly MessageId[]; readonly runtimeMessageIds: readonly MessageId[] }};\nexport type Mf2RuntimeParts = {{ readonly manifest: unknown; readonly idMap: unknown; readonly packs: Record<string, Uint8Array | ArrayBuffer> }};\nexport type Mf2RuntimeInstance = {{ defaultLocale(): string; supportedLocales(): string[]; negotiateLocale(requested?: string | readonly string[]): string; hasMessage(key: string): boolean; format(locale: string, key: string, args?: unknown): string }};\nexport type Mf2RuntimeClass = {{ fromParts(parts: Mf2RuntimeParts): Mf2RuntimeInstance }};\nexport type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;\nexport type HybridLoaderOptions = {{ readonly baseUrl?: string; readonly fetch?: FetchLike; readonly cacheKey?: string; readonly cache?: boolean }};\nexport type HybridFormatOptions = HybridLoaderOptions & {{ readonly locales?: string | readonly string[] }};\n",
+        render_web_typescript_metadata_types(
+            default_locale,
+            supported_locales,
+            namespaces,
+            message_metadata
+        )
+    )
+}
+
+fn render_hybrid_loaders(
+    hybrid_assets: &HybridWebAssets,
+    runtime_assets: &RuntimeWebAssets,
+    supported_locales: &[String],
+    static_namespaces: &[String],
+) -> Result<String, HybridWebBuildError> {
+    let hybrid_assets_json = serde_json::to_string_pretty(hybrid_assets)?;
+    let runtime_assets_json = serde_json::to_string_pretty(runtime_assets)?;
+    let mut loader_entries = Vec::new();
+    for locale in supported_locales {
+        for namespace in static_namespaces {
+            let import_path = format!("./{MESSAGES_DIR}/{locale}/{namespace}.json");
+            loader_entries.push(format!(
+                "  {{\n    locale: {},\n    namespace: {},\n    loader: async () => (await import({})).default as StaticMessages,\n  }}",
+                json_string(locale),
+                json_string(namespace),
+                json_string(&import_path)
+            ));
+        }
+    }
+    let static_loaders = if loader_entries.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}\n", loader_entries.join(",\n"))
+    };
+    let mut output = String::new();
+    output.push_str(
+        "import { MESSAGE_NAMESPACES } from \"./types\";\nimport type { ArgsFor, FetchLike, HybridFormatOptions, HybridLoaderOptions, HybridWebAssets, Locale, MessageId, Mf2RuntimeClass, Mf2RuntimeInstance, Mf2RuntimeParts, Namespace, RuntimeWebAssets, RuntimeWebPackAsset, StaticMessages } from \"./types\";\n\n",
+    );
+    output.push_str("export const HYBRID_ASSETS = ");
+    output.push_str(&hybrid_assets_json);
+    output.push_str(" as HybridWebAssets;\n\n");
+    output.push_str("export const RUNTIME_ASSETS = ");
+    output.push_str(&runtime_assets_json);
+    output.push_str(" as RuntimeWebAssets;\n\n");
+    output.push_str("export const STATIC_MESSAGE_LOADERS = [");
+    output.push_str(&static_loaders);
+    output.push_str("] as const;\n\n");
+    output.push_str(
+        r#"const runtimeCache = new Map<string, Promise<Mf2RuntimeInstance>>();
+const jsonCache = new Map<string, Promise<unknown>>();
+const packCache = new Map<string, Promise<Uint8Array>>();
+
+export function isStaticMessage(messageId: MessageId): boolean {
+  return HYBRID_ASSETS.staticMessageIds.includes(messageId);
+}
+
+export function isRuntimeMessage(messageId: MessageId): boolean {
+  return HYBRID_ASSETS.runtimeMessageIds.includes(messageId);
+}
+
+export function negotiateLocale(requested: string | readonly string[] = []): Locale {
+  const requestedLocales = typeof requested === "string" ? [requested] : requested;
+  for (const locale of requestedLocales) {
+    const match = lookupLocale(locale);
+    if (match) {
+      return match;
+    }
+  }
+  return HYBRID_ASSETS.defaultLocale;
+}
+
+export async function loadStaticMessages(locale: Locale, namespace: Namespace, options: HybridLoaderOptions = {}): Promise<StaticMessages> {
+  const entry = STATIC_MESSAGE_LOADERS.find((loader) => loader.locale === locale && loader.namespace === namespace);
+  if (!entry) {
+    throw new Error(`missing MF2 static messages for ${locale}/${namespace}`);
+  }
+  const cacheKey = `${options.cacheKey ?? ""}:static:${locale}:${namespace}`;
+  if (options.cache !== false) {
+    const cached = jsonCache.get(cacheKey);
+    if (cached) {
+      return cached as Promise<StaticMessages>;
+    }
+  }
+  const promise = entry.loader();
+  if (options.cache !== false) {
+    jsonCache.set(cacheKey, promise);
+  }
+  return promise;
+}
+
+export function resolveMf2AssetUrl(baseUrl: string, path: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const cleanPath = path.replace(/^\/+/, "");
+  return cleanBase.length === 0 ? cleanPath : `${cleanBase}/${cleanPath}`;
+}
+
+export function runtimeManifestUrl(baseUrl = ""): string {
+  return resolveMf2AssetUrl(baseUrl, RUNTIME_ASSETS.manifest);
+}
+
+export function runtimeIdMapUrl(baseUrl = ""): string {
+  return resolveMf2AssetUrl(baseUrl, RUNTIME_ASSETS.idMap);
+}
+
+export function packAsset(locale: Locale): RuntimeWebPackAsset {
+  const pack = RUNTIME_ASSETS.packs.find((entry) => entry.locale === locale);
+  if (!pack) {
+    throw new Error(`missing MF2 runtime pack for ${locale}`);
+  }
+  return pack;
+}
+
+export function packUrl(locale: Locale, baseUrl = ""): string {
+  return resolveMf2AssetUrl(baseUrl, packAsset(locale).url);
+}
+
+export async function loadLocale(locale: Locale, options: HybridLoaderOptions = {}): Promise<Uint8Array> {
+  const url = packUrl(locale, options.baseUrl ?? "");
+  const cacheKey = `${options.cacheKey ?? options.baseUrl ?? ""}:pack:${locale}:${url}`;
+  if (options.cache !== false) {
+    const cached = packCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+  const promise = fetchBytes(url, options);
+  if (options.cache !== false) {
+    packCache.set(cacheKey, promise);
+  }
+  return promise;
+}
+
+export async function loadRuntimeParts(options: HybridLoaderOptions = {}): Promise<Mf2RuntimeParts> {
+  const baseUrl = options.baseUrl ?? "";
+  const manifest = await fetchJsonCached(runtimeManifestUrl(baseUrl), options, "manifest");
+  const idMap = await fetchJsonCached(runtimeIdMapUrl(baseUrl), options, "id-map");
+  const packs: Record<string, Uint8Array> = {};
+  await Promise.all(RUNTIME_ASSETS.supportedLocales.map(async (locale) => {
+    packs[locale] = await loadLocale(locale, options);
+  }));
+  return { manifest, idMap, packs };
+}
+
+export async function createMf2Runtime(runtimeClass: Mf2RuntimeClass, options: HybridLoaderOptions = {}): Promise<Mf2RuntimeInstance> {
+  const cacheKey = `${options.cacheKey ?? options.baseUrl ?? ""}:runtime`;
+  if (options.cache !== false) {
+    const cached = runtimeCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+  const promise = loadRuntimeParts(options).then((parts) => runtimeClass.fromParts(parts));
+  if (options.cache !== false) {
+    runtimeCache.set(cacheKey, promise);
+  }
+  return promise;
+}
+
+export async function format<TMessageId extends MessageId>(
+  runtimeClass: Mf2RuntimeClass,
+  messageId: TMessageId,
+  args: ArgsFor<TMessageId>,
+  options: HybridFormatOptions = {},
+): Promise<string> {
+  if (isStaticMessage(messageId)) {
+    const locale = negotiateLocale(options.locales ?? []);
+    const namespace = namespaceForMessage(messageId);
+    const messages = await loadStaticMessages(locale, namespace, options);
+    const value = readStaticMessage(messages, namespace, messageId);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  const runtime = await createMf2Runtime(runtimeClass, options);
+  if (!runtime.hasMessage(messageId)) {
+    throw new Error(`missing MF2 message ${messageId}`);
+  }
+  const locale = runtime.negotiateLocale(options.locales ?? []);
+  return runtime.format(locale, messageId, args ?? {});
+}
+
+function namespaceForMessage(messageId: MessageId): Namespace {
+  const namespace = [...MESSAGE_NAMESPACES].sort((left, right) => right.length - left.length).find((value) => messageId.startsWith(`${value}.`));
+  if (!namespace) {
+    throw new Error(`missing MF2 namespace for ${messageId}`);
+  }
+  return namespace;
+}
+
+function readStaticMessage(messages: StaticMessages, namespace: Namespace, messageId: MessageId): string | undefined {
+  const relativePath = messageId.slice(namespace.length + 1);
+  const value = relativePath.split(".").reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object" || !(segment in current)) {
+      return undefined;
+    }
+    return (current as Record<string, unknown>)[segment];
+  }, messages);
+  return typeof value === "string" ? value : undefined;
+}
+
+function lookupLocale(locale: string): Locale | undefined {
+  let candidate = locale.toLowerCase().replace(/_/g, "-");
+  while (candidate.length > 0) {
+    const match = HYBRID_ASSETS.supportedLocales.find((supported) => supported.toLowerCase() === candidate);
+    if (match) {
+      return match;
+    }
+    const next = candidate.lastIndexOf("-");
+    if (next < 0) {
+      return undefined;
+    }
+    candidate = candidate.slice(0, next);
+  }
+  return undefined;
+}
+
+async function fetchJsonCached(url: string, options: HybridLoaderOptions, label: string): Promise<unknown> {
+  const cacheKey = `${options.cacheKey ?? options.baseUrl ?? ""}:json:${label}:${url}`;
+  if (options.cache !== false) {
+    const cached = jsonCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+  const promise = fetchJson(url, options);
+  if (options.cache !== false) {
+    jsonCache.set(cacheKey, promise);
+  }
+  return promise;
+}
+
+async function fetchJson(url: string, options: HybridLoaderOptions): Promise<unknown> {
+  const response = await fetchWith(options)(url);
+  assertOk(response, url);
+  return response.json();
+}
+
+async function fetchBytes(url: string, options: HybridLoaderOptions): Promise<Uint8Array> {
+  const response = await fetchWith(options)(url);
+  assertOk(response, url);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function fetchWith(options: HybridLoaderOptions): FetchLike {
+  return options.fetch ?? globalThis.fetch.bind(globalThis);
+}
+
+function assertOk(response: Response, url: string): void {
+  if (!response.ok) {
+    throw new Error(`failed to load MF2 runtime asset ${url}: ${response.status}`);
+  }
+}
+"#,
+    );
+    Ok(output)
+}
+
 fn filtered_supported_locales(
     mut catalog_locales: Vec<String>,
     target_locales: &[String],
@@ -433,6 +729,10 @@ where
     let mut bytes = serde_json::to_vec_pretty(value)?;
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+fn json_string(value: &str) -> String {
+    serde_json::to_string(value).expect("string serialization should not fail")
 }
 
 struct HybridTempDir {
@@ -573,6 +873,9 @@ mod tests {
         assert!(out_dir.join("id-map.json").exists());
         assert!(out_dir.join("id-map.sha256").exists());
         assert!(out_dir.join("metadata.json").exists());
+        assert!(out_dir.join("types.ts").exists());
+        assert!(out_dir.join("loaders.ts").exists());
+        assert!(out_dir.join("index.ts").exists());
         assert!(out_dir.join("packs/en.mf2pack").exists());
         assert!(out_dir.join("packs/es.mf2pack").exists());
         assert!(out_dir.join("messages/en/common.json").exists());
@@ -588,6 +891,21 @@ mod tests {
         assert!(hybrid_assets.contains("\"mode\": \"hybrid\""));
         assert!(hybrid_assets.contains("\"common.home.title\""));
         assert!(hybrid_assets.contains("\"common.cart.count\""));
+
+        let types = fs::read_to_string(out_dir.join("types.ts")).expect("types");
+        assert!(types.contains("HybridWebAssets"));
+        assert!(types.contains("\"common.cart.count\""));
+        assert!(types.contains("readonly \"count\": number"));
+
+        let loaders = fs::read_to_string(out_dir.join("loaders.ts")).expect("loaders");
+        assert!(loaders.contains("import { MESSAGE_NAMESPACES }"));
+        assert!(loaders.contains("FetchLike"));
+        assert!(loaders.contains("HYBRID_ASSETS"));
+        assert!(loaders.contains("STATIC_MESSAGE_LOADERS"));
+        assert!(loaders.contains("createMf2Runtime"));
+        assert!(loaders.contains("loadRuntimeParts"));
+        assert!(loaders.contains("isStaticMessage"));
+        assert!(loaders.contains("export async function format"));
 
         fs::remove_dir_all(&root).ok();
     }
