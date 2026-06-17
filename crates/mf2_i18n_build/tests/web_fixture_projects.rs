@@ -183,12 +183,13 @@ fn write_docusaurus_fixture() -> PathBuf {
     }
     fs::create_dir_all(root.join("docs").join("guide")).expect("docs");
     fs::write(root.join("docs/guide/intro.mdx"), "# Intro\n").expect("source doc");
+    fs::create_dir_all(root.join("locales/es/docs/guide")).expect("docs es");
     fs::write(root.join("id_salt.txt"), "salt").expect("salt");
     fs::write(root.join("locales/en/home.mf2"), "title = Docs\n").expect("home en");
     fs::write(root.join("locales/es/home.mf2"), "title = Documentos\n").expect("home es");
     fs::write(
-        root.join("locales/es/docs.mf2"),
-        "guide.intro = ---\ntitle: Intro\n---\n# Intro ES\n",
+        root.join("locales/es/docs/guide/intro.mf2"),
+        "content = ---\ntitle: Intro\n---\n# Intro ES\n",
     )
     .expect("docs es");
     fs::write(
