@@ -99,18 +99,33 @@ generated_at = "2026-02-01T00:00:00Z"
 stale_policy = "fail"
 ```
 
-Generate or check a target with:
+JavaScript projects should invoke the shared launcher from package scripts:
+
+```json
+{
+  "devDependencies": {
+    "@mf2-i18n/cli": "0.1.0"
+  },
+  "scripts": {
+    "mf2:gen": "mf2-i18n build-web --config i18n/mf2_i18n.toml --target app",
+    "mf2:check": "mf2-i18n check-web --config i18n/mf2_i18n.toml --target app"
+  }
+}
+```
+
+Run:
 
 ```sh
-cargo run -p mf2_i18n_cli -- build-web \
-  --config i18n/mf2_i18n.toml \
-  --target app
-
-cargo run -p mf2_i18n_cli -- build-web \
-  --config i18n/mf2_i18n.toml \
-  --target app \
-  --check
+npm run mf2:gen
+npm run mf2:check
 ```
+
+`@mf2-i18n/cli` is a Node launcher for the Rust `mf2_i18n_cli` binary. It
+resolves a configured binary, environment-provided binary, package-local native
+binary, Cargo manifest, or adjacent source checkout, then delegates without
+shell expansion. Rust workspaces may still call
+`cargo run -p mf2_i18n_cli -- build-web --config i18n/mf2_i18n.toml --target app`
+directly when developing the crates.
 
 Supported target modes:
 

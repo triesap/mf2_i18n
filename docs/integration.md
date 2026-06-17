@@ -85,22 +85,51 @@ generated_at = "2026-02-01T00:00:00Z"
 stale_policy = "fail"
 ```
 
-Generate or verify the target with:
+JavaScript projects should generate and verify web targets through the npm
+launcher package:
+
+```json
+{
+  "devDependencies": {
+    "@mf2-i18n/cli": "0.1.0"
+  },
+  "scripts": {
+    "mf2:gen": "mf2-i18n build-web --config i18n/mf2_i18n.toml --target site",
+    "mf2:check": "mf2-i18n check-web --config i18n/mf2_i18n.toml --target site"
+  }
+}
+```
+
+Then run:
 
 ```sh
-cargo run -p mf2_i18n_cli -- build-web \
-  --config i18n/mf2_i18n.toml \
-  --target site
-
-cargo run -p mf2_i18n_cli -- build-web \
-  --config i18n/mf2_i18n.toml \
-  --target site \
-  --check
+npm run mf2:gen
+npm run mf2:check
 ```
 
 `build-web` reads the named target, validates the target-specific required
 fields, generates deterministic outputs, writes `mf2-web-manifest.json`, and
 honors the target's stale-file policy.
+
+`check-web` delegates to the same Rust `build-web` command with check mode
+enabled. Direct Rust source checkouts may still use
+`cargo run -p mf2_i18n_cli -- build-web --config i18n/mf2_i18n.toml --target site`
+or add `--check` for verification, but application package scripts should not
+carry app-local workspace-discovery code.
+
+The launcher resolves the Rust CLI in this order:
+
+- `--cli-bin`
+- `MF2_I18N_CLI_BIN`
+- nearest `package.json` `mf2_i18n.cliBin`
+- package-local native binary
+- `--manifest-path`
+- `MF2_I18N_CARGO_MANIFEST_PATH`
+- nearest `package.json` `mf2_i18n.cargoManifestPath`
+- adjacent source checkout
+
+`mf2-i18n doctor` reports the selected resolution path without generating
+outputs.
 
 ### plain JSON target
 
@@ -303,22 +332,22 @@ Docusaurus target owns the files.
 
 ### migrate from `export-web-json`
 
-`export-web-json` remains available as a compatibility command for literal-only
-JSON output, but new web integrations should use `build-web`.
+`export-web-json` remains available for literal-only JSON output, but new web
+integrations should use named `build-web` targets through `@mf2-i18n/cli`.
 
 Migration steps:
 
 1. Add one or more `[[web.targets]]` entries to `mf2_i18n.toml`.
 2. Replace `mf2_i18n_cli export-web-json --out <dir> --mode plain` with
-   `mf2_i18n_cli build-web --target <name>`.
+   a package script that runs `mf2-i18n build-web --target <name>`.
 3. Replace app-local TypeScript loader handwork with generated `types.ts`,
    `loaders.ts`, and `index.ts`.
 4. For mixed literal and dynamic web copy, use one `hybrid` target instead of
    separate plain/runtime outputs for the same UI.
 5. For Docusaurus, delete custom code-json and localized-MDX sync scripts and
    let `build-web --target docs` write Docusaurus-native outputs.
-6. Add `build-web --target <name> --check` to CI or local verification when the
-   generated outputs are checked in.
+6. Add `mf2-i18n check-web --target <name>` to CI or local verification when
+   the generated outputs are checked in.
 
 ### downstream Docusaurus proof
 
