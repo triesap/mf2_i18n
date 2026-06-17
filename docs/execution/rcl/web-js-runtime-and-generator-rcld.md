@@ -1,7 +1,8 @@
 # mf2_i18n Web JS Runtime And Generator RCLD
 
-Status: active
+Status: complete
 Created: 2026-06-17
+Completed: 2026-06-17
 Owner: mf2_i18n
 
 ## Goal
@@ -59,16 +60,17 @@ The crate family already has strong foundations:
 - `mf2_i18n_cli export-web-json` emits literal-only JSON plus a TypeScript
   loader manifest.
 
-The gaps to close are product-surface gaps rather than fundamental runtime
-gaps:
+The product-surface gaps covered by this RCLD are closed:
 
-- web target configuration is not represented in `mf2_i18n.toml`
-- `export-web-json` only supports literal messages
-- TypeScript output lacks typed message ids and typed args
-- WASM callers must manually assemble manifests, id maps, and packs
-- Docusaurus consumers need app-local sync scripts
-- generated output is not staged and atomically replaced
-- stale generated files are not detected
+- web target configuration is represented in `mf2_i18n.toml`
+- `build-web` covers `plain-json`, `runtime`, and `docusaurus` targets
+- generated TypeScript emits typed locales, namespaces, message ids, and args
+- runtime targets generate validated MF2 assets plus browser loader helpers
+- Docusaurus targets generate Docusaurus-native locale files and localized MDX
+- generated output uses staged writes, `--check`, manifests, and stale policy
+
+The deferred `hybrid` target remains intentionally outside this completed RCLD
+and is governed by [web-hybrid-target-rcld.md](web-hybrid-target-rcld.md).
 
 ## Target Architecture
 
@@ -523,6 +525,17 @@ pnpm --dir domains/public/sites/dev/docs run test:site:radroots-scripts
 j rs local public-site docs check
 ```
 
+Status: completed in Radroots Platform commit `57d87aa7`.
+
+Validation:
+
+- `pnpm --dir domains/public/sites/dev/docs run test:site:docusaurus` passed
+- `pnpm --dir domains/public/sites/dev/docs run test:site:radroots-scripts`
+  passed
+- `uv run --project . --package radroots_scripts radroots-scripts local public-site docs check`
+  passed as the non-interactive equivalent of `j rs local public-site docs
+  check`
+
 ### RCLD-12: Documentation And Migration Guide
 
 Update `README.md` and `docs/integration.md` with the web target contract,
@@ -536,6 +549,14 @@ cargo fmt --all -- --check
 cargo test
 ```
 
+Status: completed in commit `191aa84`.
+
+Validation:
+
+- `git diff --check` passed
+- `cargo fmt --all -- --check` passed
+- `cargo test` passed with the existing native macro dead-code warnings
+
 ### RCLD-13: Deferred Hybrid Planning Gate
 
 Re-review implemented `plain-json`, `runtime`, `docusaurus`, and Radroots docs
@@ -548,3 +569,9 @@ Green lane:
 cargo fmt --all -- --check
 cargo test
 ```
+
+Status: completed by creating
+[web-hybrid-target-rcld.md](web-hybrid-target-rcld.md).
+
+The next required follow-on slices are listed in the hybrid RCLD. This RCLD has
+no remaining executable slices.
