@@ -9,7 +9,8 @@ It provides:
 - checked-in `id_salt.txt` project inputs
 - portable `.mf2pack` artifacts instead of runtime parsing
 - runtime surfaces for filesystem, embedded, and native hosts
-- generated static JSON for JavaScript apps that do not run an MF2 runtime
+- generated web artifacts for JavaScript apps, React-style bundlers, and
+  Docusaurus sites
 - browser WASM bindings for JavaScript apps that need full MF2 behavior
 
 ## Install
@@ -79,36 +80,71 @@ This generates:
 
 ## Web And JavaScript
 
-Use static JSON when a JavaScript app only needs literal localized strings:
+Websites declare generated outputs in `mf2_i18n.toml` with named web targets:
 
-```sh
-cargo run -p mf2_i18n_cli -- export-web-json \
-  --config i18n/mf2_i18n.toml \
-  --out web-i18n \
-  --mode plain
+```toml
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "app"
+mode = "runtime"
+framework = "vite"
+out_dir = "src/generated/mf2"
+locales = ["en", "es"]
+namespaces = ["home", "checkout"]
+release_id = "app-local"
+generated_at = "2026-02-01T00:00:00Z"
+stale_policy = "fail"
 ```
 
-This writes `web-i18n/messages/<locale>/<namespace>.json` and
-`web-i18n/i18n-manifest.ts`. Plain mode rejects variables, formatters, select,
-and plural messages so the generated JSON stays directly consumable by TypeScript
-apps that do not link an MF2 runtime.
-
-Use the WASM runtime when a JavaScript app needs MF2 variables, formatters,
-selects, plurals, dates, numbers, or currencies:
+Generate or check a target with:
 
 ```sh
-cargo run -p mf2_i18n_cli -- build \
+cargo run -p mf2_i18n_cli -- build-web \
   --config i18n/mf2_i18n.toml \
-  --out i18n-runtime \
-  --release-id app-local \
-  --generated-at 2026-02-01T00:00:00Z
+  --target app
+
+cargo run -p mf2_i18n_cli -- build-web \
+  --config i18n/mf2_i18n.toml \
+  --target app \
+  --check
 ```
 
-The build command writes `manifest.json`, `id-map.json`, and
-`packs/<locale>.mf2pack`. These files are application runtime data. Browser or
-bundler code should load them with `Mf2Runtime.fromParts(...)` from
-`@mf2-i18n/runtime`, using `manifest`, `idMap`, and a locale-keyed `packs` byte
-map.
+Supported target modes:
+
+- `plain-json`: literal-only JSON for JavaScript apps that do not run MF2 in
+  the browser
+- `runtime`: full MF2 runtime artifacts, packs, TypeScript metadata, and
+  generated browser loader helpers
+- `docusaurus`: Docusaurus-native `i18n/<locale>/code.json`, theme
+  translation JSON, docs plugin metadata, localized MDX, and generated React
+  page message metadata
+
+Plain JSON mode rejects variables, formatters, select, and plural messages.
+Runtime mode supports MF2 variables, formatters, selects, plurals, dates,
+numbers, and currencies through generated loaders and `mf2_i18n_wasm`.
+
+For Docusaurus:
+
+```toml
+[[web.targets]]
+name = "docs"
+mode = "docusaurus"
+framework = "docusaurus"
+out_dir = "src/generated/mf2"
+docs_source_dir = "docs"
+docusaurus_i18n_dir = "i18n"
+docusaurus_sidebar_id = "docsSidebar"
+locales = ["en", "es"]
+namespaces = ["home", "docs", "docusaurus"]
+stale_policy = "fail"
+```
+
+The generated Docusaurus files intentionally use Docusaurus locale routing and
+translation conventions. Apps should remove custom sync scripts once
+`build-web --target docs` owns those outputs.
 
 ## Lower-Level Crates
 
