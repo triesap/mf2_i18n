@@ -26,6 +26,7 @@ pub mod project_pipeline;
 pub mod validator;
 pub mod web;
 pub mod web_json;
+pub mod web_metadata;
 
 pub use crate::compiler::CompileError;
 pub use crate::config::{
@@ -56,4 +57,8 @@ pub use crate::web_json::{
     PlainJsonWebBuildError, PlainJsonWebBuildOptions, PlainJsonWebBuildOutput, WebJsonExportError,
     WebJsonExportOptions, WebJsonExportOutput, WebJsonMessageFile, WebJsonMode,
     WebJsonModeParseError, WebJsonUnsupportedKind, build_plain_json_web_target, export_web_json,
+};
+pub use crate::web_metadata::{
+    WebMessageArg, WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
+    infer_web_message_args,
 };
