@@ -2,7 +2,8 @@
 
 #[cfg(feature = "build")]
 pub use mf2_i18n_build::{
-    BuildIoError, CompileError, NativeModuleBuildError, NativeModuleBuildOptions,
+    BuildIoError, CompileError, DocusaurusWebBuildError, DocusaurusWebBuildOptions,
+    DocusaurusWebBuildOutput, NativeModuleBuildError, NativeModuleBuildOptions,
     NativeModuleBuildOutput, PlainJsonWebBuildError, PlainJsonWebBuildOptions,
     PlainJsonWebBuildOutput, PlatformBundle, PlatformBundleError, PlatformBundleManifest,
     PlatformPack, ProjectCatalog, ProjectCatalogError, ProjectCatalogLoad, ProjectCatalogMessage,
@@ -14,11 +15,11 @@ pub use mf2_i18n_build::{
     WebArtifactWriteOutput, WebConfig, WebFramework, WebJsonExportError, WebJsonExportOptions,
     WebJsonExportOutput, WebJsonMessageFile, WebJsonMode, WebJsonModeParseError,
     WebJsonUnsupportedKind, WebMessageArg, WebMessageMetadata, WebMessageMetadataError,
-    WebStalePolicy, WebTargetConfig, WebTargetConfigError, WebTargetMode, build_native_module,
-    build_plain_json_web_target, build_project_runtime_artifacts, build_runtime_web_target,
-    collect_web_message_metadata, export_web_json, infer_web_message_args,
-    load_platform_bundle_manifest, load_project_catalogs, load_project_config,
-    load_project_config_or_default, render_web_typescript_metadata_types,
+    WebStalePolicy, WebTargetConfig, WebTargetConfigError, WebTargetMode,
+    build_docusaurus_web_target, build_native_module, build_plain_json_web_target,
+    build_project_runtime_artifacts, build_runtime_web_target, collect_web_message_metadata,
+    export_web_json, infer_web_message_args, load_platform_bundle_manifest, load_project_catalogs,
+    load_project_config, load_project_config_or_default, render_web_typescript_metadata_types,
     resolve_config_relative_path, write_platform_bundle_manifest, write_web_artifacts,
 };
 pub use mf2_i18n_core::{

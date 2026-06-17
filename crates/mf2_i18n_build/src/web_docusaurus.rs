@@ -1,0 +1,713 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+use thiserror::Error;
+
+use crate::project::{ProjectError, ProjectLayout, resolve_config_relative_path};
+use crate::project_catalogs::{ProjectCatalog, ProjectCatalogError};
+use crate::web::{
+    WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
+    WebArtifactWriteOutput, write_web_artifacts,
+};
+use crate::web_metadata::{
+    WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
+};
+use crate::{WebStalePolicy, WebTargetConfigError, WebTargetMode};
+
+const DOCS_NAMESPACE: &str = "docs";
+const DOCUSAURUS_NAMESPACE: &str = "docusaurus";
+const DEFAULT_SIDEBAR_ID: &str = "docsSidebar";
+const DOCUSAURUS_DOCS_PLUGIN: &str = "docusaurus-plugin-content-docs/current";
+const MANAGED_STATE_FILE: &str = ".mf2-managed.json";
+
+#[derive(Debug, Clone)]
+pub struct DocusaurusWebBuildOptions {
+    config_path: PathBuf,
+    target_name: String,
+    out_dir_override: Option<PathBuf>,
+    check: bool,
+}
+
+impl DocusaurusWebBuildOptions {
+    pub fn new(config_path: impl Into<PathBuf>, target_name: impl Into<String>) -> Self {
+        Self {
+            config_path: config_path.into(),
+            target_name: target_name.into(),
+            out_dir_override: None,
+            check: false,
+        }
+    }
+
+    pub fn with_out_dir(mut self, out_dir: impl Into<PathBuf>) -> Self {
+        self.out_dir_override = Some(out_dir.into());
+        self
+    }
+
+    pub fn with_check(mut self, check: bool) -> Self {
+        self.check = check;
+        self
+    }
+
+    pub fn config_path(&self) -> &Path {
+        &self.config_path
+    }
+
+    pub fn target_name(&self) -> &str {
+        &self.target_name
+    }
+
+    pub fn out_dir_override(&self) -> Option<&Path> {
+        self.out_dir_override.as_deref()
+    }
+
+    pub fn check(&self) -> bool {
+        self.check
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DocusaurusWebBuildOutput {
+    artifact_output: WebArtifactWriteOutput,
+    i18n_root: PathBuf,
+    default_locale: String,
+    supported_locales: Vec<String>,
+    namespaces: Vec<String>,
+    message_metadata: Vec<WebMessageMetadata>,
+}
+
+impl DocusaurusWebBuildOutput {
+    pub fn artifact_output(&self) -> &WebArtifactWriteOutput {
+        &self.artifact_output
+    }
+
+    pub fn i18n_root(&self) -> &Path {
+        &self.i18n_root
+    }
+
+    pub fn default_locale(&self) -> &str {
+        &self.default_locale
+    }
+
+    pub fn supported_locales(&self) -> &[String] {
+        &self.supported_locales
+    }
+
+    pub fn namespaces(&self) -> &[String] {
+        &self.namespaces
+    }
+
+    pub fn message_metadata(&self) -> &[WebMessageMetadata] {
+        &self.message_metadata
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum DocusaurusWebBuildError {
+    #[error(transparent)]
+    Project(#[from] ProjectError),
+    #[error(transparent)]
+    Config(#[from] WebTargetConfigError),
+    #[error(transparent)]
+    Catalogs(#[from] ProjectCatalogError),
+    #[error(transparent)]
+    Metadata(#[from] WebMessageMetadataError),
+    #[error(transparent)]
+    Artifacts(#[from] WebArtifactError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error("missing web target {0}")]
+    MissingTarget(String),
+    #[error("web target {target} must use docusaurus mode")]
+    UnsupportedTargetMode { target: String },
+    #[error("docusaurus web target {target} is missing docs_source_dir")]
+    MissingDocsSourceDir { target: String },
+    #[error("docusaurus web target {target} is missing docusaurus_i18n_dir")]
+    MissingI18nDir { target: String },
+    #[error("docusaurus output drift for {0:?}")]
+    CheckFailed(PathBuf),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ManagedState {
+    #[serde(default)]
+    code: Vec<String>,
+    #[serde(default)]
+    docs: Vec<String>,
+    #[serde(default)]
+    targets: BTreeMap<String, Vec<String>>,
+}
+
+pub fn build_docusaurus_web_target(
+    options: &DocusaurusWebBuildOptions,
+) -> Result<DocusaurusWebBuildOutput, DocusaurusWebBuildError> {
+    let project = ProjectLayout::load_or_default(options.config_path())?;
+    project.config().validate_web_targets()?;
+    let target = project
+        .config()
+        .web
+        .target(options.target_name())
+        .ok_or_else(|| DocusaurusWebBuildError::MissingTarget(options.target_name().to_owned()))?
+        .clone();
+    if target.mode != WebTargetMode::Docusaurus {
+        return Err(DocusaurusWebBuildError::UnsupportedTargetMode {
+            target: target.name.clone(),
+        });
+    }
+
+    let loaded_catalogs = crate::project_catalogs::load_project_catalogs(&project)?;
+    let catalogs = filtered_catalogs(
+        loaded_catalogs.catalogs(),
+        &target.locales,
+        &target.namespaces,
+    );
+    let default_locale = project.config().default_locale.clone();
+    let default_catalog = catalogs
+        .get(&default_locale)
+        .ok_or_else(|| ProjectCatalogError::MissingDefaultLocale(default_locale.clone()))?;
+    let namespace_filter = (!target.namespaces.is_empty()).then_some(target.namespaces.as_slice());
+    let message_metadata =
+        collect_web_message_metadata(&default_locale, default_catalog, namespace_filter)?;
+    let namespaces = namespaces_from_metadata(&message_metadata);
+    let supported_locales = catalogs.keys().cloned().collect::<Vec<_>>();
+    let i18n_root = resolve_config_relative_path(
+        options.config_path(),
+        target.docusaurus_i18n_dir.as_deref().ok_or_else(|| {
+            DocusaurusWebBuildError::MissingI18nDir {
+                target: target.name.clone(),
+            }
+        })?,
+    );
+    let docs_source_dir = resolve_config_relative_path(
+        options.config_path(),
+        target.docs_source_dir.as_deref().ok_or_else(|| {
+            DocusaurusWebBuildError::MissingDocsSourceDir {
+                target: target.name.clone(),
+            }
+        })?,
+    );
+    let sidebar_id = target
+        .docusaurus_sidebar_id
+        .as_deref()
+        .unwrap_or(DEFAULT_SIDEBAR_ID);
+
+    let previous = read_managed_state(&i18n_root)?;
+    let generated = GeneratedDocusaurus::from_catalogs(
+        &default_locale,
+        &catalogs,
+        &docs_source_dir,
+        sidebar_id,
+    );
+    write_docusaurus_outputs(
+        &i18n_root,
+        &default_locale,
+        &generated,
+        &previous,
+        options.check(),
+    )?;
+
+    let out_dir = options
+        .out_dir_override()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolve_config_relative_path(options.config_path(), &target.out_dir));
+    let artifact_output = write_web_artifacts(
+        &WebArtifactWriteOptions::new(out_dir)
+            .with_stale_policy(target.stale_policy.unwrap_or(WebStalePolicy::Fail))
+            .with_check(options.check()),
+        &WebArtifactManifestInput {
+            target: target.name.clone(),
+            mode: target.mode,
+            framework: target.framework,
+            default_locale: default_locale.clone(),
+            supported_locales: supported_locales.clone(),
+            namespaces: namespaces.clone(),
+        },
+        vec![WebArtifactFile::new(
+            "messages.ts",
+            render_messages_module(
+                &default_locale,
+                &supported_locales,
+                &generated.code_by_locale,
+            )
+            .into_bytes(),
+        )?],
+    )?;
+
+    Ok(DocusaurusWebBuildOutput {
+        artifact_output,
+        i18n_root,
+        default_locale,
+        supported_locales,
+        namespaces,
+        message_metadata,
+    })
+}
+
+struct GeneratedDocusaurus {
+    code_by_locale: BTreeMap<String, BTreeMap<String, String>>,
+    docs_by_locale: BTreeMap<String, BTreeMap<String, String>>,
+    targets_by_locale: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
+    managed_code: Vec<String>,
+    managed_docs: Vec<String>,
+    managed_targets: BTreeMap<String, Vec<String>>,
+}
+
+impl GeneratedDocusaurus {
+    fn from_catalogs(
+        default_locale: &str,
+        catalogs: &BTreeMap<String, ProjectCatalog>,
+        docs_source_dir: &Path,
+        sidebar_id: &str,
+    ) -> Self {
+        let mut code_by_locale = BTreeMap::new();
+        let mut docs_by_locale = BTreeMap::new();
+        let mut targets_by_locale = BTreeMap::new();
+
+        for (locale, catalog) in catalogs {
+            let mut code = BTreeMap::new();
+            let mut docs = BTreeMap::new();
+            let mut targets = BTreeMap::<String, BTreeMap<String, String>>::new();
+
+            for message in catalog.values() {
+                match message.namespace.as_str() {
+                    DOCS_NAMESPACE => {
+                        docs.insert(
+                            doc_output_path(&message.message_path),
+                            message.value.clone(),
+                        );
+                    }
+                    DOCUSAURUS_NAMESPACE => {
+                        if let Some((target_path, id)) =
+                            docusaurus_target_id(&message.message_path, sidebar_id)
+                        {
+                            targets
+                                .entry(target_path)
+                                .or_default()
+                                .insert(id, message.value.clone());
+                        }
+                    }
+                    _ => {
+                        code.insert(message.qualified_key.clone(), message.value.clone());
+                    }
+                }
+            }
+
+            code_by_locale.insert(locale.clone(), code);
+            docs_by_locale.insert(locale.clone(), docs);
+            targets_by_locale.insert(locale.clone(), targets);
+        }
+
+        let managed_code = code_by_locale
+            .get(default_locale)
+            .map(|messages| messages.keys().cloned().collect())
+            .unwrap_or_default();
+        let managed_docs = docs_by_locale
+            .get(default_locale)
+            .map(|docs| docs.keys().cloned().collect())
+            .unwrap_or_default();
+        let mut managed_targets = BTreeMap::new();
+        if let Some(targets) = targets_by_locale.get(default_locale) {
+            for (target_path, ids) in targets {
+                managed_targets.insert(target_path.clone(), ids.keys().cloned().collect());
+            }
+        }
+
+        for doc_path in &managed_docs {
+            let source_path = docs_source_dir.join(doc_path);
+            if !source_path.exists() {
+                continue;
+            }
+        }
+
+        Self {
+            code_by_locale,
+            docs_by_locale,
+            targets_by_locale,
+            managed_code,
+            managed_docs,
+            managed_targets,
+        }
+    }
+}
+
+fn write_docusaurus_outputs(
+    i18n_root: &Path,
+    default_locale: &str,
+    generated: &GeneratedDocusaurus,
+    previous: &ManagedState,
+    check: bool,
+) -> Result<(), DocusaurusWebBuildError> {
+    for (locale, code) in &generated.code_by_locale {
+        if locale == default_locale {
+            continue;
+        }
+        let code_path = i18n_root.join(locale).join("code.json");
+        let next = merge_code_json(
+            read_json_object(&code_path)?,
+            code,
+            &generated.managed_code,
+            &previous.code,
+            "code.json",
+        );
+        write_json_or_check(&code_path, &Value::Object(next), check)?;
+    }
+
+    for (locale, docs) in &generated.docs_by_locale {
+        if locale == default_locale {
+            continue;
+        }
+        let docs_root = i18n_root.join(locale).join(DOCUSAURUS_DOCS_PLUGIN);
+        for doc_path in &previous.docs {
+            if !generated.managed_docs.contains(doc_path) {
+                let stale_path = docs_root.join(doc_path);
+                if !check {
+                    fs::remove_file(stale_path).ok();
+                }
+            }
+        }
+        for (doc_path, contents) in docs {
+            write_bytes_or_check(
+                &docs_root.join(doc_path),
+                format!("{contents}\n").as_bytes(),
+                check,
+            )?;
+        }
+    }
+
+    for (locale, targets) in &generated.targets_by_locale {
+        if locale == default_locale {
+            continue;
+        }
+        for (target_path, entries) in targets {
+            let output_path = i18n_root.join(locale).join(target_path);
+            let previous_ids = previous
+                .targets
+                .get(target_path)
+                .cloned()
+                .unwrap_or_default();
+            let managed_ids = generated
+                .managed_targets
+                .get(target_path)
+                .cloned()
+                .unwrap_or_default();
+            let next = merge_code_json(
+                read_json_object(&output_path)?,
+                entries,
+                &managed_ids,
+                &previous_ids,
+                target_path,
+            );
+            write_json_or_check(&output_path, &Value::Object(next), check)?;
+        }
+    }
+
+    write_json_or_check(
+        &i18n_root.join(MANAGED_STATE_FILE),
+        &serde_json::to_value(ManagedState {
+            code: generated.managed_code.clone(),
+            docs: generated.managed_docs.clone(),
+            targets: generated.managed_targets.clone(),
+        })?,
+        check,
+    )
+}
+
+fn merge_code_json(
+    existing: Map<String, Value>,
+    messages: &BTreeMap<String, String>,
+    managed_ids: &[String],
+    previous_ids: &[String],
+    target_path: &str,
+) -> Map<String, Value> {
+    let mut next = existing;
+    for id in previous_ids {
+        if !managed_ids.contains(id) {
+            next.remove(id);
+        }
+    }
+    for id in managed_ids {
+        if let Some(message) = messages.get(id) {
+            next.insert(
+                id.clone(),
+                serde_json::json!({
+                    "message": message,
+                    "description": format!("MF2-managed Docusaurus string from {id} for {target_path}."),
+                }),
+            );
+        }
+    }
+    sort_json_map(next)
+}
+
+fn read_managed_state(i18n_root: &Path) -> Result<ManagedState, DocusaurusWebBuildError> {
+    let path = i18n_root.join(MANAGED_STATE_FILE);
+    if !path.exists() {
+        return Ok(ManagedState::default());
+    }
+    Ok(serde_json::from_slice(&fs::read(path)?)?)
+}
+
+fn read_json_object(path: &Path) -> Result<Map<String, Value>, DocusaurusWebBuildError> {
+    if !path.exists() {
+        return Ok(Map::new());
+    }
+    match serde_json::from_slice::<Value>(&fs::read(path)?)? {
+        Value::Object(object) => Ok(object),
+        _ => Ok(Map::new()),
+    }
+}
+
+fn write_json_or_check(
+    path: &Path,
+    value: &Value,
+    check: bool,
+) -> Result<(), DocusaurusWebBuildError> {
+    let mut bytes = serde_json::to_vec_pretty(value)?;
+    bytes.push(b'\n');
+    write_bytes_or_check(path, &bytes, check)
+}
+
+fn write_bytes_or_check(
+    path: &Path,
+    bytes: &[u8],
+    check: bool,
+) -> Result<(), DocusaurusWebBuildError> {
+    if check {
+        let existing = fs::read(path).unwrap_or_default();
+        if existing != bytes {
+            return Err(DocusaurusWebBuildError::CheckFailed(path.to_path_buf()));
+        }
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, bytes)?;
+    Ok(())
+}
+
+fn render_messages_module(
+    default_locale: &str,
+    supported_locales: &[String],
+    code_by_locale: &BTreeMap<String, BTreeMap<String, String>>,
+) -> String {
+    let default_messages = code_by_locale
+        .get(default_locale)
+        .cloned()
+        .unwrap_or_default();
+    format!(
+        "export const DEFAULT_LOCALE = {} as const;\nexport const SUPPORTED_LOCALES = {} as const;\nexport const MESSAGES = {} as const;\nexport type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];\nexport type Mf2MessageId = keyof (typeof MESSAGES)[typeof DEFAULT_LOCALE];\nexport const DEFAULT_MESSAGES = {} as const satisfies Record<Mf2MessageId, string>;\n",
+        json_string(default_locale),
+        serde_json::to_string(supported_locales).expect("locales"),
+        serde_json::to_string_pretty(code_by_locale).expect("messages"),
+        serde_json::to_string_pretty(&default_messages).expect("default messages"),
+    )
+}
+
+fn filtered_catalogs(
+    catalogs: &BTreeMap<String, ProjectCatalog>,
+    locale_filter: &[String],
+    namespace_filter: &[String],
+) -> BTreeMap<String, ProjectCatalog> {
+    let mut filtered = BTreeMap::new();
+    for (locale, catalog) in catalogs {
+        if !locale_filter.is_empty() && !locale_filter.contains(locale) {
+            continue;
+        }
+        let messages = catalog
+            .iter()
+            .filter(|(_, message)| {
+                namespace_filter.is_empty() || namespace_filter.contains(&message.namespace)
+            })
+            .map(|(key, message)| (key.clone(), message.clone()))
+            .collect::<ProjectCatalog>();
+        filtered.insert(locale.clone(), messages);
+    }
+    filtered
+}
+
+fn namespaces_from_metadata(message_metadata: &[WebMessageMetadata]) -> Vec<String> {
+    message_metadata
+        .iter()
+        .map(|message| message.namespace.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn doc_output_path(message_path: &str) -> String {
+    format!("{}.mdx", message_path.replace('.', "/"))
+}
+
+fn docusaurus_target_id(message_path: &str, sidebar_id: &str) -> Option<(String, String)> {
+    if let Some(label) = message_path.strip_prefix("navbar.") {
+        let id = if label == "logo_alt" {
+            "logo.alt".to_string()
+        } else {
+            format!("item.label.{}", label_id(label))
+        };
+        return Some(("docusaurus-theme-classic/navbar.json".to_string(), id));
+    }
+    if let Some(label) = message_path.strip_prefix("docs.sidebar.") {
+        return Some((
+            "docusaurus-plugin-content-docs/current.json".to_string(),
+            format!("sidebar.{sidebar_id}.category.{}", label_id(label)),
+        ));
+    }
+    None
+}
+
+fn label_id(value: &str) -> String {
+    match value {
+        "github" => "GitHub".to_string(),
+        "ios" => "iOS".to_string(),
+        "sdk" => "SDK".to_string(),
+        _ => value
+            .split(['_', '-'])
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                let mut chars = part.chars();
+                match chars.next() {
+                    Some(first) => {
+                        format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+fn sort_json_map(map: Map<String, Value>) -> Map<String, Value> {
+    map.into_iter()
+        .collect::<BTreeMap<_, _>>()
+        .into_iter()
+        .collect()
+}
+
+fn json_string(value: &str) -> String {
+    serde_json::to_string(value).expect("string serialization should not fail")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DocusaurusWebBuildOptions, build_docusaurus_web_target};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        path.push(format!("mf2_i18n_docusaurus_{name}_{nanos}"));
+        fs::create_dir_all(&path).expect("dir");
+        path
+    }
+
+    fn write_fixture(root: &Path) -> PathBuf {
+        for locale in ["en", "es"] {
+            fs::create_dir_all(root.join("locales").join(locale)).expect("locale");
+        }
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+        fs::create_dir_all(root.join("docs").join("radroots")).expect("docs");
+        fs::write(root.join("docs/radroots/introduction.mdx"), "# Intro\n").expect("doc");
+        fs::write(
+            root.join("locales/en/home.mf2"),
+            "head.title = Developer Docs\n",
+        )
+        .expect("home en");
+        fs::write(
+            root.join("locales/es/home.mf2"),
+            "head.title = Documentacion\n",
+        )
+        .expect("home es");
+        fs::write(
+            root.join("locales/en/docs.mf2"),
+            "radroots.introduction = ---\ntitle: Introduction\n---\n# Introduction\n",
+        )
+        .expect("docs en");
+        fs::write(
+            root.join("locales/es/docs.mf2"),
+            "radroots.introduction = ---\ntitle: Introduccion\n---\n# Introduccion\n",
+        )
+        .expect("docs es");
+        fs::write(
+            root.join("locales/en/docusaurus.mf2"),
+            "navbar.overview = Overview\n\ndocs.sidebar.overview = Overview\n",
+        )
+        .expect("docusaurus en");
+        fs::write(
+            root.join("locales/es/docusaurus.mf2"),
+            "navbar.overview = Introduccion\n\ndocs.sidebar.overview = Introduccion\n",
+        )
+        .expect("docusaurus es");
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"docs\"\nmode = \"docusaurus\"\nframework = \"docusaurus\"\nout_dir = \"src/generated/mf2\"\ndocs_source_dir = \"docs\"\ndocusaurus_i18n_dir = \"i18n\"\ndocusaurus_sidebar_id = \"radrootsSidebar\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\", \"docs\", \"docusaurus\"]\nstale_policy = \"fail\"\n",
+        )
+        .expect("config");
+        config_path
+    }
+
+    #[test]
+    fn builds_docusaurus_native_outputs() {
+        let root = temp_dir("target");
+        let config_path = write_fixture(&root);
+
+        let output =
+            build_docusaurus_web_target(&DocusaurusWebBuildOptions::new(&config_path, "docs"))
+                .expect("build");
+
+        assert_eq!(output.default_locale(), "en");
+        assert_eq!(
+            output.supported_locales(),
+            &["en".to_string(), "es".to_string()]
+        );
+        assert_eq!(
+            output.namespaces(),
+            &[
+                "docs".to_string(),
+                "docusaurus".to_string(),
+                "home".to_string()
+            ]
+        );
+        assert_eq!(output.message_metadata().len(), 4);
+        assert!(output.artifact_output().manifest_path().exists());
+        assert!(output.i18n_root().join(".mf2-managed.json").exists());
+
+        let code_json = fs::read_to_string(root.join("i18n/es/code.json")).expect("code");
+        assert!(code_json.contains("\"home.head.title\""));
+        assert!(code_json.contains("Documentacion"));
+
+        let doc = fs::read_to_string(
+            root.join("i18n/es/docusaurus-plugin-content-docs/current/radroots/introduction.mdx"),
+        )
+        .expect("doc");
+        assert!(doc.contains("# Introduccion"));
+
+        let navbar = fs::read_to_string(root.join("i18n/es/docusaurus-theme-classic/navbar.json"))
+            .expect("navbar");
+        assert!(navbar.contains("\"item.label.Overview\""));
+
+        let current_json =
+            fs::read_to_string(root.join("i18n/es/docusaurus-plugin-content-docs/current.json"))
+                .expect("current json");
+        assert!(current_json.contains("sidebar.radrootsSidebar.category.Overview"));
+
+        let messages_ts =
+            fs::read_to_string(root.join("src/generated/mf2/messages.ts")).expect("messages");
+        assert!(messages_ts.contains("SUPPORTED_LOCALES"));
+        assert!(messages_ts.contains("home.head.title"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+}
