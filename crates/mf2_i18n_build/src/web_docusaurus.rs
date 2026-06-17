@@ -7,7 +7,10 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::project::{ProjectError, ProjectLayout, resolve_config_relative_path};
-use crate::project_catalogs::{ProjectCatalog, ProjectCatalogError};
+use crate::project_catalogs::{
+    ProjectCatalog, ProjectCatalogError, ProjectCatalogLoadOptions,
+    load_project_catalogs_with_options,
+};
 use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
     WebArtifactWriteOutput, write_web_artifacts,
@@ -130,6 +133,19 @@ pub enum DocusaurusWebBuildError {
     MissingI18nDir { target: String },
     #[error("docusaurus output drift for {0:?}")]
     CheckFailed(PathBuf),
+    #[error("docusaurus default locale {locale} must not define docs namespace messages")]
+    DefaultLocaleDocsCatalog {
+        locale: String,
+        source_paths: Vec<PathBuf>,
+    },
+    #[error("docusaurus locale {locale} docs catalog does not match docs_source_dir")]
+    TranslatedDocsMismatch {
+        locale: String,
+        missing: Vec<String>,
+        extra: Vec<String>,
+    },
+    #[error("docusaurus docs source path is not UTF-8: {0:?}")]
+    NonUtf8DocPath(PathBuf),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -159,7 +175,15 @@ pub fn build_docusaurus_web_target(
         });
     }
 
-    let loaded_catalogs = crate::project_catalogs::load_project_catalogs(&project)?;
+    let manages_docs = target.namespaces.is_empty()
+        || target
+            .namespaces
+            .iter()
+            .any(|namespace| namespace == DOCS_NAMESPACE);
+    let loaded_catalogs = load_project_catalogs_with_options(
+        &project,
+        &ProjectCatalogLoadOptions::default().ignore_key_match_namespace(DOCS_NAMESPACE),
+    )?;
     let catalogs = filtered_catalogs(
         loaded_catalogs.catalogs(),
         &target.locales,
@@ -172,7 +196,6 @@ pub fn build_docusaurus_web_target(
     let namespace_filter = (!target.namespaces.is_empty()).then_some(target.namespaces.as_slice());
     let message_metadata =
         collect_web_message_metadata(&default_locale, default_catalog, namespace_filter)?;
-    let namespaces = namespaces_from_metadata(&message_metadata);
     let supported_locales = catalogs.keys().cloned().collect::<Vec<_>>();
     let i18n_root = resolve_config_relative_path(
         options.config_path(),
@@ -194,14 +217,21 @@ pub fn build_docusaurus_web_target(
         .docusaurus_sidebar_id
         .as_deref()
         .unwrap_or(DEFAULT_SIDEBAR_ID);
+    let source_docs = if manages_docs {
+        discover_source_docs(&docs_source_dir)?
+    } else {
+        BTreeSet::new()
+    };
 
     let previous = read_managed_state(&i18n_root)?;
     let generated = GeneratedDocusaurus::from_catalogs(
         &default_locale,
         &catalogs,
-        &docs_source_dir,
+        &source_docs,
+        manages_docs,
         sidebar_id,
-    );
+    )?;
+    let namespaces = generated_namespaces(&message_metadata, manages_docs);
     write_docusaurus_outputs(
         &i18n_root,
         &default_locale,
@@ -260,12 +290,14 @@ impl GeneratedDocusaurus {
     fn from_catalogs(
         default_locale: &str,
         catalogs: &BTreeMap<String, ProjectCatalog>,
-        docs_source_dir: &Path,
+        source_docs: &BTreeSet<String>,
+        manages_docs: bool,
         sidebar_id: &str,
-    ) -> Self {
+    ) -> Result<Self, DocusaurusWebBuildError> {
         let mut code_by_locale = BTreeMap::new();
         let mut docs_by_locale = BTreeMap::new();
         let mut targets_by_locale = BTreeMap::new();
+        let mut default_docs_source_paths = BTreeSet::new();
 
         for (locale, catalog) in catalogs {
             let mut code = BTreeMap::new();
@@ -275,10 +307,14 @@ impl GeneratedDocusaurus {
             for message in catalog.values() {
                 match message.namespace.as_str() {
                     DOCS_NAMESPACE => {
-                        docs.insert(
-                            doc_output_path(&message.message_path),
-                            message.value.clone(),
-                        );
+                        if locale == default_locale {
+                            default_docs_source_paths.insert(message.source_path.clone());
+                        } else if manages_docs {
+                            docs.insert(
+                                doc_output_path(&message.message_path),
+                                message.value.clone(),
+                            );
+                        }
                     }
                     DOCUSAURUS_NAMESPACE => {
                         if let Some((target_path, id)) =
@@ -301,14 +337,18 @@ impl GeneratedDocusaurus {
             targets_by_locale.insert(locale.clone(), targets);
         }
 
+        if !default_docs_source_paths.is_empty() {
+            return Err(DocusaurusWebBuildError::DefaultLocaleDocsCatalog {
+                locale: default_locale.to_string(),
+                source_paths: default_docs_source_paths.into_iter().collect(),
+            });
+        }
+
         let managed_code = code_by_locale
             .get(default_locale)
             .map(|messages| messages.keys().cloned().collect())
             .unwrap_or_default();
-        let managed_docs = docs_by_locale
-            .get(default_locale)
-            .map(|docs| docs.keys().cloned().collect())
-            .unwrap_or_default();
+        let managed_docs = source_docs.iter().cloned().collect::<Vec<_>>();
         let mut managed_targets = BTreeMap::new();
         if let Some(targets) = targets_by_locale.get(default_locale) {
             for (target_path, ids) in targets {
@@ -316,21 +356,38 @@ impl GeneratedDocusaurus {
             }
         }
 
-        for doc_path in &managed_docs {
-            let source_path = docs_source_dir.join(doc_path);
-            if !source_path.exists() {
-                continue;
+        if manages_docs {
+            for (locale, docs) in &docs_by_locale {
+                if locale == default_locale {
+                    continue;
+                }
+                let doc_paths = docs.keys().cloned().collect::<BTreeSet<_>>();
+                let missing = source_docs
+                    .difference(&doc_paths)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let extra = doc_paths
+                    .difference(source_docs)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !missing.is_empty() || !extra.is_empty() {
+                    return Err(DocusaurusWebBuildError::TranslatedDocsMismatch {
+                        locale: locale.clone(),
+                        missing,
+                        extra,
+                    });
+                }
             }
         }
 
-        Self {
+        Ok(Self {
             code_by_locale,
             docs_by_locale,
             targets_by_locale,
             managed_code,
             managed_docs,
             managed_targets,
-        }
+        })
     }
 }
 
@@ -539,6 +596,55 @@ fn namespaces_from_metadata(message_metadata: &[WebMessageMetadata]) -> Vec<Stri
         .collect()
 }
 
+fn generated_namespaces(
+    message_metadata: &[WebMessageMetadata],
+    manages_docs: bool,
+) -> Vec<String> {
+    let mut namespaces = namespaces_from_metadata(message_metadata)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if manages_docs {
+        namespaces.insert(DOCS_NAMESPACE.to_string());
+    }
+    namespaces.into_iter().collect()
+}
+
+fn discover_source_docs(
+    docs_source_dir: &Path,
+) -> Result<BTreeSet<String>, DocusaurusWebBuildError> {
+    let mut docs = BTreeSet::new();
+    collect_source_docs(docs_source_dir, docs_source_dir, &mut docs)?;
+    Ok(docs)
+}
+
+fn collect_source_docs(
+    root: &Path,
+    current: &Path,
+    docs: &mut BTreeSet<String>,
+) -> Result<(), DocusaurusWebBuildError> {
+    let mut entries = fs::read_dir(current)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_source_docs(root, &path, docs)?;
+            continue;
+        }
+        if path.extension().and_then(|value| value.to_str()) != Some("mdx") {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| DocusaurusWebBuildError::NonUtf8DocPath(path.clone()))?;
+        let relative = relative
+            .to_str()
+            .ok_or_else(|| DocusaurusWebBuildError::NonUtf8DocPath(path.clone()))?
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        docs.insert(relative);
+    }
+    Ok(())
+}
+
 fn doc_output_path(message_path: &str) -> String {
     format!("{}.mdx", message_path.replace('.', "/"))
 }
@@ -596,7 +702,7 @@ fn json_string(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DocusaurusWebBuildOptions, build_docusaurus_web_target};
+    use super::{DocusaurusWebBuildError, DocusaurusWebBuildOptions, build_docusaurus_web_target};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -629,11 +735,6 @@ mod tests {
             "head.title = Documentacion\n",
         )
         .expect("home es");
-        fs::write(
-            root.join("locales/en/docs.mf2"),
-            "radroots.introduction = ---\ntitle: Introduction\n---\n# Introduction\n",
-        )
-        .expect("docs en");
         fs::write(
             root.join("locales/es/docs.mf2"),
             "radroots.introduction = ---\ntitle: Introduccion\n---\n# Introduccion\n",
@@ -680,7 +781,7 @@ mod tests {
                 "home".to_string()
             ]
         );
-        assert_eq!(output.message_metadata().len(), 4);
+        assert_eq!(output.message_metadata().len(), 3);
         assert!(output.artifact_output().manifest_path().exists());
         assert!(output.i18n_root().join(".mf2-managed.json").exists());
 
@@ -707,6 +808,79 @@ mod tests {
             fs::read_to_string(root.join("src/generated/mf2/messages.ts")).expect("messages");
         assert!(messages_ts.contains("SUPPORTED_LOCALES"));
         assert!(messages_ts.contains("home.head.title"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rejects_default_locale_docs_catalog() {
+        let root = temp_dir("default_docs_rejected");
+        let config_path = write_fixture(&root);
+        fs::write(
+            root.join("locales/en/docs.mf2"),
+            "radroots.introduction = ---\ntitle: Introduction\n---\n# Introduction\n",
+        )
+        .expect("docs en");
+
+        let err =
+            build_docusaurus_web_target(&DocusaurusWebBuildOptions::new(&config_path, "docs"))
+                .expect_err("default docs should fail");
+
+        assert!(matches!(
+            err,
+            DocusaurusWebBuildError::DefaultLocaleDocsCatalog { locale, .. }
+                if locale == "en"
+        ));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rejects_missing_translated_doc() {
+        let root = temp_dir("missing_translated_doc");
+        let config_path = write_fixture(&root);
+        fs::write(
+            root.join("docs/radroots/architecture.mdx"),
+            "# Architecture\n",
+        )
+        .expect("source doc");
+
+        let err =
+            build_docusaurus_web_target(&DocusaurusWebBuildOptions::new(&config_path, "docs"))
+                .expect_err("missing doc should fail");
+
+        assert!(matches!(
+            err,
+            DocusaurusWebBuildError::TranslatedDocsMismatch { locale, missing, extra }
+                if locale == "es"
+                    && missing == vec!["radroots/architecture.mdx".to_string()]
+                    && extra.is_empty()
+        ));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rejects_extra_translated_doc() {
+        let root = temp_dir("extra_translated_doc");
+        let config_path = write_fixture(&root);
+        fs::write(
+            root.join("locales/es/docs.mf2"),
+            "radroots.introduction = ---\ntitle: Introduccion\n---\n# Introduccion\n\nradroots.extra = ---\ntitle: Extra\n---\n# Extra\n",
+        )
+        .expect("docs es");
+
+        let err =
+            build_docusaurus_web_target(&DocusaurusWebBuildOptions::new(&config_path, "docs"))
+                .expect_err("extra doc should fail");
+
+        assert!(matches!(
+            err,
+            DocusaurusWebBuildError::TranslatedDocsMismatch { locale, missing, extra }
+                if locale == "es"
+                    && missing.is_empty()
+                    && extra == vec!["radroots/extra.mdx".to_string()]
+        ));
 
         fs::remove_dir_all(&root).ok();
     }

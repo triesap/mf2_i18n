@@ -40,6 +40,18 @@ impl ProjectCatalogLoad {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ProjectCatalogLoadOptions {
+    ignored_key_match_namespaces: BTreeSet<String>,
+}
+
+impl ProjectCatalogLoadOptions {
+    pub fn ignore_key_match_namespace(mut self, namespace: impl Into<String>) -> Self {
+        self.ignored_key_match_namespaces.insert(namespace.into());
+        self
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ProjectCatalogError {
     #[error("io error: {0}")]
@@ -96,6 +108,13 @@ pub enum ProjectCatalogError {
 pub fn load_project_catalogs(
     project: &ProjectLayout,
 ) -> Result<ProjectCatalogLoad, ProjectCatalogError> {
+    load_project_catalogs_with_options(project, &ProjectCatalogLoadOptions::default())
+}
+
+pub fn load_project_catalogs_with_options(
+    project: &ProjectLayout,
+    options: &ProjectCatalogLoadOptions,
+) -> Result<ProjectCatalogLoad, ProjectCatalogError> {
     let source_roots = project.source_roots();
     if source_roots.is_empty() {
         return Err(ProjectCatalogError::NoSourceDirs);
@@ -130,7 +149,7 @@ pub fn load_project_catalogs(
         return Err(ProjectCatalogError::MissingDefaultLocale(default_locale));
     }
 
-    ensure_catalog_keys_match(&catalogs)?;
+    ensure_catalog_keys_match(&catalogs, &options.ignored_key_match_namespaces)?;
 
     Ok(ProjectCatalogLoad {
         catalogs,
@@ -302,14 +321,15 @@ fn insert_message(
 
 fn ensure_catalog_keys_match(
     catalogs: &BTreeMap<String, ProjectCatalog>,
+    ignored_namespaces: &BTreeSet<String>,
 ) -> Result<(), ProjectCatalogError> {
     let Some((reference_locale, reference_catalog)) = catalogs.iter().next() else {
         return Err(ProjectCatalogError::NoLocaleCatalogs);
     };
 
-    let reference_keys = reference_catalog.keys().cloned().collect::<Vec<_>>();
+    let reference_keys = comparable_keys(reference_catalog, ignored_namespaces);
     for (locale, catalog) in catalogs.iter().skip(1) {
-        let keys = catalog.keys().cloned().collect::<Vec<_>>();
+        let keys = comparable_keys(catalog, ignored_namespaces);
         if keys != reference_keys {
             return Err(ProjectCatalogError::CatalogKeyMismatch {
                 locale: locale.clone(),
@@ -319,6 +339,14 @@ fn ensure_catalog_keys_match(
     }
 
     Ok(())
+}
+
+fn comparable_keys(catalog: &ProjectCatalog, ignored_namespaces: &BTreeSet<String>) -> Vec<String> {
+    catalog
+        .values()
+        .filter(|message| !ignored_namespaces.contains(&message.namespace))
+        .map(|message| message.qualified_key.clone())
+        .collect()
 }
 
 fn qualified_key(namespace: &str, key: &str) -> String {
@@ -338,7 +366,10 @@ fn json_kind(value: &Value) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProjectCatalogError, load_project_catalogs};
+    use super::{
+        ProjectCatalogError, ProjectCatalogLoadOptions, load_project_catalogs,
+        load_project_catalogs_with_options,
+    };
     use crate::project::ProjectLayout;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -446,6 +477,35 @@ mod tests {
             ProjectCatalogError::CatalogKeyMismatch { locale, reference_locale }
                 if locale == "es" && reference_locale == "en"
         ));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn can_ignore_one_namespace_for_key_matching() {
+        let root = temp_dir("ignore_namespace");
+        let en_dir = root.join("locales").join("en");
+        let es_dir = root.join("locales").join("es");
+        fs::create_dir_all(&en_dir).expect("en");
+        fs::create_dir_all(&es_dir).expect("es");
+        fs::write(en_dir.join("common.json"), r#"{"title":"Hi"}"#).expect("en json");
+        fs::write(es_dir.join("common.json"), r#"{"title":"Hola"}"#).expect("es json");
+        fs::write(es_dir.join("docs.mf2"), "guide.intro = Hola").expect("es docs");
+
+        let config_path = write_config(&root, "en");
+        let project = ProjectLayout::load(&config_path).expect("project");
+        let loaded = load_project_catalogs_with_options(
+            &project,
+            &ProjectCatalogLoadOptions::default().ignore_key_match_namespace("docs"),
+        )
+        .expect("load");
+
+        assert!(
+            loaded
+                .catalog("es")
+                .expect("es")
+                .contains_key("docs.guide.intro")
+        );
 
         fs::remove_dir_all(&root).ok();
     }

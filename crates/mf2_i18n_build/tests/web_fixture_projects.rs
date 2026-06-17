@@ -187,11 +187,6 @@ fn write_docusaurus_fixture() -> PathBuf {
     fs::write(root.join("locales/en/home.mf2"), "title = Docs\n").expect("home en");
     fs::write(root.join("locales/es/home.mf2"), "title = Documentos\n").expect("home es");
     fs::write(
-        root.join("locales/en/docs.mf2"),
-        "guide.intro = ---\ntitle: Intro\n---\n# Intro\n",
-    )
-    .expect("docs en");
-    fs::write(
         root.join("locales/es/docs.mf2"),
         "guide.intro = ---\ntitle: Intro\n---\n# Intro ES\n",
     )
