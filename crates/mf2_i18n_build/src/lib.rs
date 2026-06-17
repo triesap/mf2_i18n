@@ -27,7 +27,10 @@ pub mod validator;
 pub mod web_json;
 
 pub use crate::compiler::CompileError;
-pub use crate::config::{ProjectConfig, load_project_config, load_project_config_or_default};
+pub use crate::config::{
+    ProjectConfig, WebConfig, WebFramework, WebStalePolicy, WebTargetConfig, WebTargetConfigError,
+    WebTargetMode, load_project_config, load_project_config_or_default,
+};
 pub use crate::error::BuildIoError;
 pub use crate::platform::{
     PlatformBundle, PlatformBundleError, PlatformBundleManifest, PlatformPack,
