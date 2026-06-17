@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {dirname, resolve} from 'node:path';
-import {packageVersion, parseArgs, runCli} from '../src/cli.mjs';
+import {buildWebArgs, packageVersion, parseArgs, runCli} from '../src/cli.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -65,6 +65,27 @@ test('check-web enables check mode', () => {
   assert.equal(parsed.command, 'check-web');
   assert.equal(parsed.options.config, 'mf2_i18n.toml');
   assert.equal(parsed.options.check, true);
+});
+
+test('builds Rust build-web arguments', () => {
+  assert.deepEqual(
+    buildWebArgs('build-web', {
+      target: 'docs',
+      config: 'locales/mf2_i18n.toml',
+      out: 'src/generated/mf2',
+      check: false,
+    }),
+    ['build-web', '--target', 'docs', '--config', 'locales/mf2_i18n.toml', '--out', 'src/generated/mf2'],
+  );
+
+  assert.deepEqual(
+    buildWebArgs('check-web', {
+      target: 'docs',
+      config: 'mf2_i18n.toml',
+      check: true,
+    }),
+    ['build-web', '--target', 'docs', '--config', 'mf2_i18n.toml', '--check'],
+  );
 });
 
 test('reports unknown commands and missing targets', async () => {
@@ -142,6 +163,121 @@ test('doctor reports all failed resolution attempts', async () => {
   assert.match(result.stderr, /adjacent source checkout: skipped/);
 });
 
+test('build-web invokes an explicit Rust CLI binary', async () => {
+  const root = await testRoot('run-bin');
+  const bin = resolve(root, 'mf2_i18n_cli');
+  await writeFile(bin, '#!/bin/sh\nexit 0\n');
+  await chmod(bin, 0o755);
+  const calls = [];
+
+  const result = await capture(
+    [
+      'build-web',
+      '--target',
+      'docs',
+      '--config',
+      'locales/mf2_i18n.toml',
+      '--out',
+      'src/generated/mf2',
+      '--cli-bin',
+      bin,
+    ],
+    {cwd: root, spawn: async (call) => recordCall(calls, call, {status: 0})},
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, bin);
+  assert.equal(calls[0].cwd, root);
+  assert.deepEqual(calls[0].args, [
+    'build-web',
+    '--target',
+    'docs',
+    '--config',
+    'locales/mf2_i18n.toml',
+    '--out',
+    'src/generated/mf2',
+  ]);
+});
+
+test('check-web invokes build-web with check mode', async () => {
+  const root = await testRoot('run-check');
+  const bin = resolve(root, 'mf2_i18n_cli');
+  await writeFile(bin, '#!/bin/sh\nexit 0\n');
+  await chmod(bin, 0o755);
+  const calls = [];
+
+  const result = await capture(
+    ['check-web', '--target', 'docs', '--cli-bin', bin],
+    {cwd: root, spawn: async (call) => recordCall(calls, call, {status: 0})},
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(calls[0].args, ['build-web', '--target', 'docs', '--config', 'mf2_i18n.toml', '--check']);
+});
+
+test('build-web appends arguments after cargo manifest launcher args', async () => {
+  const root = await testRoot('run-manifest');
+  const manifest = resolve(root, 'mf2_i18n/Cargo.toml');
+  await mkdir(dirname(manifest), {recursive: true});
+  await writeFile(manifest, '[workspace]\n');
+  const calls = [];
+
+  const result = await capture(
+    ['build-web', '--target', 'docs', '--manifest-path', manifest],
+    {
+      cwd: root,
+      env: {CARGO: '/custom/cargo'},
+      spawn: async (call) => recordCall(calls, call, {status: 0}),
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(calls[0].command, '/custom/cargo');
+  assert.deepEqual(calls[0].args, [
+    'run',
+    '--manifest-path',
+    manifest,
+    '-p',
+    'mf2_i18n_cli',
+    '--',
+    'build-web',
+    '--target',
+    'docs',
+    '--config',
+    'mf2_i18n.toml',
+  ]);
+});
+
+test('build-web returns child failure status and stderr', async () => {
+  const root = await testRoot('run-failure');
+  const bin = resolve(root, 'mf2_i18n_cli');
+  await writeFile(bin, '#!/bin/sh\nexit 37\n');
+  await chmod(bin, 0o755);
+
+  const result = await capture(
+    ['build-web', '--target', 'docs', '--cli-bin', bin],
+    {cwd: root, spawn: async () => ({status: 37, stderr: 'build failed\n'})},
+  );
+
+  assert.equal(result.exitCode, 37);
+  assert.equal(result.stderr, 'build failed\n');
+});
+
+test('build-web maps child signals to shell-compatible exit codes', async () => {
+  const root = await testRoot('run-signal');
+  const bin = resolve(root, 'mf2_i18n_cli');
+  await writeFile(bin, '#!/bin/sh\nexit 0\n');
+  await chmod(bin, 0o755);
+
+  const result = await capture(
+    ['build-web', '--target', 'docs', '--cli-bin', bin],
+    {cwd: root, spawn: async () => ({signal: 'SIGINT'})},
+  );
+
+  assert.equal(result.exitCode, 130);
+});
+
 async function capture(argv, runtime = {}) {
   let stdout = '';
   let stderr = '';
@@ -163,4 +299,9 @@ async function testRoot(name) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function recordCall(calls, call, result) {
+  calls.push(call);
+  return result;
 }

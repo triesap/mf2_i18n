@@ -1,3 +1,4 @@
+import {spawn} from 'node:child_process';
 import {
   CliResolutionError,
   formatResolution,
@@ -98,8 +99,8 @@ export async function runCli(argv, io, runtime = {}) {
       io.stdout.write(`${formatResolution(resolution)}\n`);
       return 0;
     }
-    io.stderr.write(`mf2-i18n ${parsed.command} is not wired to mf2_i18n_cli yet\n`);
-    return 1;
+    const resolution = resolveRustCli(parsed.options, runtime);
+    return await runRustCli(resolution, buildWebArgs(parsed.command, parsed.options), io, runtime);
   } catch (error) {
     if (error instanceof CliUsageError) {
       io.stderr.write(`${error.message}\n\n${usage()}\n`);
@@ -111,6 +112,87 @@ export async function runCli(argv, io, runtime = {}) {
     }
     throw error;
   }
+}
+
+export function buildWebArgs(command, options) {
+  const args = ['build-web', '--target', options.target, '--config', options.config];
+  if (options.out) {
+    args.push('--out', options.out);
+  }
+  if (command === 'check-web' || options.check) {
+    args.push('--check');
+  }
+  return args;
+}
+
+async function runRustCli(resolution, rustArgs, io, runtime) {
+  const command = resolution.command;
+  const args = [...resolution.args, ...rustArgs];
+  const env = runtime.env ?? process.env;
+
+  if (runtime.spawn) {
+    return childExitCode(await runtime.spawn({command, args, cwd: resolution.cwd, env}), io);
+  }
+
+  return await new Promise((resolveExitCode) => {
+    const child = spawn(command, args, {
+      cwd: resolution.cwd,
+      env,
+      stdio: ['ignore', 'inherit', 'inherit'],
+    });
+
+    child.on('error', (error) => {
+      io.stderr.write(`failed to start ${command}: ${error.message}\n`);
+      resolveExitCode(1);
+    });
+
+    child.on('exit', (code, signal) => {
+      resolveExitCode(childExitCode({status: code, signal}, io));
+    });
+  });
+}
+
+function childExitCode(result, io) {
+  if (typeof result === 'number') {
+    return result;
+  }
+  if (typeof result?.stdout === 'string') {
+    io.stdout.write(result.stdout);
+  }
+  if (typeof result?.stderr === 'string') {
+    io.stderr.write(result.stderr);
+  }
+  if (typeof result?.status === 'number') {
+    return result.status;
+  }
+  if (typeof result?.code === 'number') {
+    return result.code;
+  }
+  if (result?.signal) {
+    return 128 + signalNumber(result.signal);
+  }
+  return 0;
+}
+
+function signalNumber(signal) {
+  const signals = {
+    SIGHUP: 1,
+    SIGINT: 2,
+    SIGQUIT: 3,
+    SIGILL: 4,
+    SIGTRAP: 5,
+    SIGABRT: 6,
+    SIGBUS: 7,
+    SIGFPE: 8,
+    SIGKILL: 9,
+    SIGUSR1: 10,
+    SIGSEGV: 11,
+    SIGUSR2: 12,
+    SIGPIPE: 13,
+    SIGALRM: 14,
+    SIGTERM: 15,
+  };
+  return signals[signal] ?? 1;
 }
 
 function parseOptions(args) {
