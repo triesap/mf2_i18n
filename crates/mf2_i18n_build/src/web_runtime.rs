@@ -388,7 +388,7 @@ fn render_runtime_types(
     message_metadata: &[WebMessageMetadata],
 ) -> String {
     format!(
-        "{}export type RuntimeWebPackAsset = {{ readonly locale: Locale; readonly url: string; readonly kind: string; readonly hash: string; readonly size: number; readonly parent?: Locale }};\nexport type RuntimeWebAssets = {{ readonly schema: number; readonly target: string; readonly mode: \"runtime\"; readonly defaultLocale: Locale; readonly supportedLocales: readonly Locale[]; readonly manifest: string; readonly platformBundle: string; readonly idMap: string; readonly idMapHash: string; readonly metadata: string; readonly packs: readonly RuntimeWebPackAsset[] }};\n",
+        "{}export type Mf2RuntimeArg = string | number | boolean | {{ readonly type: \"datetime\"; readonly unixMilliseconds: number }} | {{ readonly type: \"datetime\"; readonly unixSeconds: number }} | {{ readonly type: \"currency\"; readonly value: number; readonly code: string }};\nexport type Mf2RuntimeArgs = Record<string, Mf2RuntimeArg>;\nexport type RuntimeWebPackAsset = {{ readonly locale: Locale; readonly url: string; readonly kind: string; readonly hash: string; readonly size: number; readonly parent?: Locale }};\nexport type RuntimeWebAssets = {{ readonly schema: number; readonly target: string; readonly mode: \"runtime\"; readonly defaultLocale: Locale; readonly supportedLocales: readonly Locale[]; readonly manifest: string; readonly platformBundle: string; readonly idMap: string; readonly idMapHash: string; readonly metadata: string; readonly packs: readonly RuntimeWebPackAsset[] }};\nexport type Mf2RuntimeParts = {{ readonly manifest: unknown; readonly idMap: unknown; readonly packs: Record<string, Uint8Array | ArrayBuffer> }};\nexport type Mf2RuntimeInstance = {{ defaultLocale(): string; supportedLocales(): string[]; negotiateLocale(requested?: string | readonly string[]): string; hasMessage(key: string): boolean; format(locale: string, key: string, args?: unknown): string }};\nexport type Mf2RuntimeClass = {{ fromParts(parts: Mf2RuntimeParts): Mf2RuntimeInstance }};\nexport type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;\nexport type RuntimeLoaderOptions = {{ readonly baseUrl?: string; readonly fetch?: FetchLike; readonly cacheKey?: string; readonly cache?: boolean }};\nexport type RuntimeFormatOptions = {{ readonly locales?: string | readonly string[] }};\n",
         render_web_typescript_metadata_types(
             default_locale,
             supported_locales,
@@ -402,9 +402,138 @@ fn render_runtime_loaders(
     runtime_assets: &RuntimeWebAssets,
 ) -> Result<String, RuntimeWebBuildError> {
     let assets_json = serde_json::to_string_pretty(runtime_assets)?;
-    Ok(format!(
-        "import type {{ Locale, RuntimeWebAssets, RuntimeWebPackAsset }} from \"./types\";\n\nexport const RUNTIME_ASSETS = {assets_json} as RuntimeWebAssets;\n\nexport function resolveMf2AssetUrl(baseUrl: string, path: string): string {{\n  const cleanBase = baseUrl.replace(/\\/+$/, \"\");\n  const cleanPath = path.replace(/^\\/+/, \"\");\n  return cleanBase.length === 0 ? cleanPath : `${{cleanBase}}/${{cleanPath}}`;\n}}\n\nexport function runtimeManifestUrl(baseUrl = \"\"): string {{\n  return resolveMf2AssetUrl(baseUrl, RUNTIME_ASSETS.manifest);\n}}\n\nexport function runtimeIdMapUrl(baseUrl = \"\"): string {{\n  return resolveMf2AssetUrl(baseUrl, RUNTIME_ASSETS.idMap);\n}}\n\nexport function packAsset(locale: Locale): RuntimeWebPackAsset {{\n  const pack = RUNTIME_ASSETS.packs.find((entry) => entry.locale === locale);\n  if (!pack) {{\n    throw new Error(`missing MF2 runtime pack for ${{locale}}`);\n  }}\n  return pack;\n}}\n\nexport function packUrl(locale: Locale, baseUrl = \"\"): string {{\n  return resolveMf2AssetUrl(baseUrl, packAsset(locale).url);\n}}\n"
-    ))
+    let mut output = String::new();
+    output.push_str(
+        "import type { ArgsFor, FetchLike, Locale, MessageId, Mf2RuntimeClass, Mf2RuntimeInstance, Mf2RuntimeParts, RuntimeFormatOptions, RuntimeLoaderOptions, RuntimeWebAssets, RuntimeWebPackAsset } from \"./types\";\n\n",
+    );
+    output.push_str("export const RUNTIME_ASSETS = ");
+    output.push_str(&assets_json);
+    output.push_str(" as RuntimeWebAssets;\n\n");
+    output.push_str(
+        r#"const runtimeCache = new Map<string, Promise<Mf2RuntimeInstance>>();
+const jsonCache = new Map<string, Promise<unknown>>();
+const packCache = new Map<string, Promise<Uint8Array>>();
+
+export function resolveMf2AssetUrl(baseUrl: string, path: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const cleanPath = path.replace(/^\/+/, "");
+  return cleanBase.length === 0 ? cleanPath : `${cleanBase}/${cleanPath}`;
+}
+
+export function runtimeManifestUrl(baseUrl = ""): string {
+  return resolveMf2AssetUrl(baseUrl, RUNTIME_ASSETS.manifest);
+}
+
+export function runtimeIdMapUrl(baseUrl = ""): string {
+  return resolveMf2AssetUrl(baseUrl, RUNTIME_ASSETS.idMap);
+}
+
+export function packAsset(locale: Locale): RuntimeWebPackAsset {
+  const pack = RUNTIME_ASSETS.packs.find((entry) => entry.locale === locale);
+  if (!pack) {
+    throw new Error(`missing MF2 runtime pack for ${locale}`);
+  }
+  return pack;
+}
+
+export function packUrl(locale: Locale, baseUrl = ""): string {
+  return resolveMf2AssetUrl(baseUrl, packAsset(locale).url);
+}
+
+export async function loadLocale(locale: Locale, options: RuntimeLoaderOptions = {}): Promise<Uint8Array> {
+  const url = packUrl(locale, options.baseUrl ?? "");
+  const cacheKey = `${options.cacheKey ?? options.baseUrl ?? ""}:pack:${locale}:${url}`;
+  if (options.cache !== false) {
+    const cached = packCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+  const promise = fetchBytes(url, options);
+  if (options.cache !== false) {
+    packCache.set(cacheKey, promise);
+  }
+  return promise;
+}
+
+export async function loadRuntimeParts(options: RuntimeLoaderOptions = {}): Promise<Mf2RuntimeParts> {
+  const baseUrl = options.baseUrl ?? "";
+  const manifest = await fetchJsonCached(runtimeManifestUrl(baseUrl), options, "manifest");
+  const idMap = await fetchJsonCached(runtimeIdMapUrl(baseUrl), options, "id-map");
+  const packs: Record<string, Uint8Array> = {};
+  await Promise.all(RUNTIME_ASSETS.supportedLocales.map(async (locale) => {
+    packs[locale] = await loadLocale(locale, options);
+  }));
+  return { manifest, idMap, packs };
+}
+
+export async function createMf2Runtime(runtimeClass: Mf2RuntimeClass, options: RuntimeLoaderOptions = {}): Promise<Mf2RuntimeInstance> {
+  const cacheKey = `${options.cacheKey ?? options.baseUrl ?? ""}:runtime`;
+  if (options.cache !== false) {
+    const cached = runtimeCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+  const promise = loadRuntimeParts(options).then((parts) => runtimeClass.fromParts(parts));
+  if (options.cache !== false) {
+    runtimeCache.set(cacheKey, promise);
+  }
+  return promise;
+}
+
+export function format<TMessageId extends MessageId>(
+  runtime: Mf2RuntimeInstance,
+  messageId: TMessageId,
+  args: ArgsFor<TMessageId>,
+  options: RuntimeFormatOptions = {},
+): string {
+  if (!runtime.hasMessage(messageId)) {
+    throw new Error(`missing MF2 message ${messageId}`);
+  }
+  const locale = runtime.negotiateLocale(options.locales ?? []);
+  return runtime.format(locale, messageId, args ?? {});
+}
+
+async function fetchJsonCached(url: string, options: RuntimeLoaderOptions, label: string): Promise<unknown> {
+  const cacheKey = `${options.cacheKey ?? options.baseUrl ?? ""}:json:${label}:${url}`;
+  if (options.cache !== false) {
+    const cached = jsonCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+  const promise = fetchJson(url, options);
+  if (options.cache !== false) {
+    jsonCache.set(cacheKey, promise);
+  }
+  return promise;
+}
+
+async function fetchJson(url: string, options: RuntimeLoaderOptions): Promise<unknown> {
+  const response = await fetchWith(options)(url);
+  assertOk(response, url);
+  return response.json();
+}
+
+async function fetchBytes(url: string, options: RuntimeLoaderOptions): Promise<Uint8Array> {
+  const response = await fetchWith(options)(url);
+  assertOk(response, url);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function fetchWith(options: RuntimeLoaderOptions): FetchLike {
+  return options.fetch ?? globalThis.fetch.bind(globalThis);
+}
+
+function assertOk(response: Response, url: string): void {
+  if (!response.ok) {
+    throw new Error(`failed to load MF2 runtime asset ${url}: ${response.status}`);
+  }
+}
+"#,
+    );
+    Ok(output)
 }
 
 fn json_bytes<T>(value: &T) -> Result<Vec<u8>, serde_json::Error>
@@ -563,10 +692,18 @@ mod tests {
         let types = fs::read_to_string(out_dir.join("types.ts")).expect("types");
         assert!(types.contains("\"common.cart.count\""));
         assert!(types.contains("readonly \"count\": number"));
+        assert!(types.contains("Mf2RuntimeClass"));
+        assert!(types.contains("Mf2RuntimeParts"));
 
         let loaders = fs::read_to_string(out_dir.join("loaders.ts")).expect("loaders");
         assert!(loaders.contains("RUNTIME_ASSETS"));
+        assert!(loaders.contains("createMf2Runtime"));
+        assert!(loaders.contains("loadRuntimeParts"));
+        assert!(loaders.contains("loadLocale"));
+        assert!(loaders.contains("runtimeCache"));
+        assert!(loaders.contains("packCache"));
         assert!(loaders.contains("packUrl"));
+        assert!(loaders.contains("export function format"));
 
         fs::remove_dir_all(&root).ok();
     }
