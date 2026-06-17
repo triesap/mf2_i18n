@@ -53,6 +53,7 @@ pub use crate::web::{
     WebArtifactWriteOptions, WebArtifactWriteOutput, write_web_artifacts,
 };
 pub use crate::web_json::{
-    WebJsonExportError, WebJsonExportOptions, WebJsonExportOutput, WebJsonMessageFile, WebJsonMode,
-    WebJsonModeParseError, WebJsonUnsupportedKind, export_web_json,
+    PlainJsonWebBuildError, PlainJsonWebBuildOptions, PlainJsonWebBuildOutput, WebJsonExportError,
+    WebJsonExportOptions, WebJsonExportOutput, WebJsonMessageFile, WebJsonMode,
+    WebJsonModeParseError, WebJsonUnsupportedKind, build_plain_json_web_target, export_web_json,
 };

@@ -3,7 +3,8 @@
 #[cfg(feature = "build")]
 pub use mf2_i18n_build::{
     BuildIoError, CompileError, NativeModuleBuildError, NativeModuleBuildOptions,
-    NativeModuleBuildOutput, PlatformBundle, PlatformBundleError, PlatformBundleManifest,
+    NativeModuleBuildOutput, PlainJsonWebBuildError, PlainJsonWebBuildOptions,
+    PlainJsonWebBuildOutput, PlatformBundle, PlatformBundleError, PlatformBundleManifest,
     PlatformPack, ProjectCatalog, ProjectCatalogError, ProjectCatalogLoad, ProjectCatalogMessage,
     ProjectConfig, ProjectError, ProjectLayout, ProjectRuntimeBuildOptions,
     ProjectRuntimeBuildOutput, WEB_ARTIFACT_MANIFEST_FILE, WEB_ARTIFACT_MANIFEST_SCHEMA,
@@ -12,9 +13,10 @@ pub use mf2_i18n_build::{
     WebFramework, WebJsonExportError, WebJsonExportOptions, WebJsonExportOutput,
     WebJsonMessageFile, WebJsonMode, WebJsonModeParseError, WebJsonUnsupportedKind, WebStalePolicy,
     WebTargetConfig, WebTargetConfigError, WebTargetMode, build_native_module,
-    build_project_runtime_artifacts, export_web_json, load_platform_bundle_manifest,
-    load_project_catalogs, load_project_config, load_project_config_or_default,
-    resolve_config_relative_path, write_platform_bundle_manifest, write_web_artifacts,
+    build_plain_json_web_target, build_project_runtime_artifacts, export_web_json,
+    load_platform_bundle_manifest, load_project_catalogs, load_project_config,
+    load_project_config_or_default, resolve_config_relative_path, write_platform_bundle_manifest,
+    write_web_artifacts,
 };
 pub use mf2_i18n_core::{
     ArgType, Args, CoreError, CoreResult, DateTimeValue, FormatBackend, FormatterId,
