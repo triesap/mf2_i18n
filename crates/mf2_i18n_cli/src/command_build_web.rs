@@ -289,11 +289,12 @@ namespaces = ["common"]
         fs::write(dir.join("id_salt.txt"), "salt").expect("salt");
         fs::create_dir_all(dir.join("docs")).expect("docs");
         fs::write(dir.join("docs/intro.mdx"), "# Intro\n").expect("doc");
+        fs::create_dir_all(dir.join("locales/es/docs")).expect("docs es");
         fs::write(dir.join("locales/en/home.mf2"), "title = Docs\n").expect("home en");
         fs::write(dir.join("locales/es/home.mf2"), "title = Documentos\n").expect("home es");
         fs::write(
-            dir.join("locales/es/docs.mf2"),
-            "intro = ---\ntitle: Intro\n---\n# Intro ES\n",
+            dir.join("locales/es/docs/intro.mf2"),
+            "content = ---\ntitle: Intro\n---\n# Intro ES\n",
         )
         .expect("docs es");
 
@@ -329,6 +330,7 @@ namespaces = ["home", "docs"]
         assert!(dir.join("generated/messages.ts").exists());
         assert!(dir.join("i18n/es/code.json").exists());
         assert!(!dir.join("locales/en/docs.mf2").exists());
+        assert!(dir.join("locales/es/docs/intro.mf2").exists());
         assert!(
             dir.join("i18n/es/docusaurus-plugin-content-docs/current/intro.mdx")
                 .exists()

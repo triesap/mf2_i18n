@@ -290,7 +290,7 @@ checked-in generated output directory, and verify it with
 
 Use `docusaurus` when a Docusaurus site should keep Docusaurus-native locale
 routing and translation files while sourcing strings and localized MDX from MF2
-catalogs:
+sources:
 
 ```toml
 [[web.targets]]
@@ -322,9 +322,17 @@ Docusaurus namespace keys map to Docusaurus files by convention:
   `item.label.<Label>` and `logo.alt`
 - `docusaurus.docs.sidebar.<id>` writes docs sidebar translation ids such as
   `sidebar.<sidebar id>.category.<Label>`
-- `docs.<path>` writes localized MDX under the docs plugin locale root
 - all other namespaces are treated as React page/component copy and written to
   `code.json` plus `messages.ts`
+
+Default-locale docs are authored directly under `docs_source_dir`. Non-default
+localized docs are authored as `locales/<locale>/docs/**/*.mf2` files. Each doc
+file must define one `content = ...` entry; everything after that entry line is
+preserved as MDX, including blank lines. The relative file path under
+`docs/` maps to the generated Docusaurus MDX path, so
+`locales/es/docs/guide/intro.mf2` generates
+`i18n/es/docusaurus-plugin-content-docs/current/guide/intro.mdx`.
+Flat `locales/<locale>/docs.mf2` catalogs are rejected for Docusaurus docs.
 
 Docusaurus should still own routing, static builds, sidebar metadata, and
 `<html lang>`. App-local sync scripts should be removed once the generated

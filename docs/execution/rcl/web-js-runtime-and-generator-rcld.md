@@ -230,6 +230,11 @@ Generated files:
 - localized docs MDX files under Docusaurus-native paths
 - generated MF2 web files needed by React page components
 
+Default-locale docs remain source MDX under `docs_source_dir`. Non-default docs
+are path-scoped files under `locales/<locale>/docs/**/*.mf2`; each file defines
+a single `content = ...` entry and its path maps to the generated localized MDX
+path. Flat `docs.mf2` catalogs are not a supported Docusaurus docs source.
+
 This mode must let a Docusaurus app remove app-local localization sync scripts.
 
 #### Deferred `hybrid`

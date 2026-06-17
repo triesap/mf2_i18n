@@ -162,8 +162,13 @@ stale_policy = "fail"
 ```
 
 The generated Docusaurus files intentionally use Docusaurus locale routing and
-translation conventions. Apps should remove custom sync scripts once
-`build-web --target docs` owns those outputs.
+translation conventions. Default-locale docs stay in `docs_source_dir`.
+Non-default localized docs are path-scoped files under
+`locales/<locale>/docs/**/*.mf2`, where each file defines a single
+`content = ...` entry and the file path maps to the generated Docusaurus MDX
+path. Flat `locales/<locale>/docs.mf2` catalogs are rejected for Docusaurus
+docs. Apps should remove custom sync scripts once `build-web --target docs`
+owns those outputs.
 
 ## Lower-Level Crates
 
