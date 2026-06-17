@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
 use mf2_i18n_build::{
-    DocusaurusWebBuildError, DocusaurusWebBuildOptions, PlainJsonWebBuildError,
-    PlainJsonWebBuildOptions, ProjectError, ProjectLayout, RuntimeWebBuildError,
-    RuntimeWebBuildOptions, WebTargetConfigError, WebTargetMode, build_docusaurus_web_target,
-    build_plain_json_web_target, build_runtime_web_target,
+    DocusaurusWebBuildError, DocusaurusWebBuildOptions, HybridWebBuildError, HybridWebBuildOptions,
+    PlainJsonWebBuildError, PlainJsonWebBuildOptions, ProjectError, ProjectLayout,
+    RuntimeWebBuildError, RuntimeWebBuildOptions, WebTargetConfigError, WebTargetMode,
+    build_docusaurus_web_target, build_hybrid_web_target, build_plain_json_web_target,
+    build_runtime_web_target,
 };
 use thiserror::Error;
 
@@ -20,10 +21,10 @@ pub enum BuildWebCommandError {
     Runtime(#[from] RuntimeWebBuildError),
     #[error(transparent)]
     Docusaurus(#[from] DocusaurusWebBuildError),
+    #[error(transparent)]
+    Hybrid(#[from] HybridWebBuildError),
     #[error("missing web target {0}")]
     MissingTarget(String),
-    #[error("web target {target} mode is not supported by build-web yet")]
-    UnsupportedTargetMode { target: String },
 }
 
 #[derive(Debug, Clone)]
@@ -78,9 +79,15 @@ pub fn run_build_web(options: &BuildWebOptions) -> Result<(), BuildWebCommandErr
             build_docusaurus_web_target(&build_options)?;
         }
         WebTargetMode::Hybrid => {
-            return Err(BuildWebCommandError::UnsupportedTargetMode {
-                target: target.name.clone(),
-            });
+            let mut build_options =
+                HybridWebBuildOptions::new(&options.config_path, &options.target_name)
+                    .with_check(options.check);
+
+            if let Some(out_dir) = &options.out_dir {
+                build_options = build_options.with_out_dir(out_dir);
+            }
+
+            build_hybrid_web_target(&build_options)?;
         }
     }
 
@@ -92,7 +99,10 @@ mod tests {
     use super::{BuildWebOptions, run_build_web};
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir() -> PathBuf {
         let mut path = std::env::temp_dir();
@@ -100,7 +110,11 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        path.push(format!("mf2_i18n_cli_build_web_{nanos}"));
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        path.push(format!(
+            "mf2_i18n_cli_build_web_{}_{nanos}_{counter}",
+            std::process::id()
+        ));
         fs::create_dir_all(&path).expect("dir");
         path
     }
@@ -198,6 +212,70 @@ generated_at = "2026-02-01T00:00:00Z"
         assert!(out_dir.join("runtime-assets.json").exists());
         assert!(out_dir.join("packs/en.mf2pack").exists());
         assert!(out_dir.join("loaders.ts").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn builds_hybrid_web_target() {
+        let dir = temp_dir();
+        for locale in ["en", "es"] {
+            fs::create_dir_all(dir.join("locales").join(locale)).expect("locale");
+        }
+        fs::write(
+            dir.join("locales/en/common.json"),
+            r#"{"home":{"title":"Hi"},"cart":{"count":"{ $count :number } items"}}"#,
+        )
+        .expect("write en");
+        fs::write(
+            dir.join("locales/es/common.json"),
+            r#"{"home":{"title":"Hola"},"cart":{"count":"{ $count :number } articulos"}}"#,
+        )
+        .expect("write es");
+        fs::write(dir.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = dir.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "hybrid"
+mode = "hybrid"
+framework = "vite"
+out_dir = "web-hybrid"
+locales = ["en", "es"]
+namespaces = ["common"]
+"#,
+        )
+        .expect("config");
+
+        run_build_web(&BuildWebOptions {
+            config_path: config_path.clone(),
+            target_name: "hybrid".to_string(),
+            out_dir: None,
+            check: false,
+        })
+        .expect("build");
+
+        let out_dir = dir.join("web-hybrid");
+        assert!(out_dir.join("hybrid-assets.json").exists());
+        assert!(out_dir.join("runtime-assets.json").exists());
+        assert!(out_dir.join("messages/en/common.json").exists());
+        assert!(out_dir.join("packs/en.mf2pack").exists());
+        assert!(out_dir.join("types.ts").exists());
+        assert!(out_dir.join("loaders.ts").exists());
+
+        run_build_web(&BuildWebOptions {
+            config_path,
+            target_name: "hybrid".to_string(),
+            out_dir: Some(out_dir),
+            check: true,
+        })
+        .expect("check");
 
         fs::remove_dir_all(&dir).ok();
     }
