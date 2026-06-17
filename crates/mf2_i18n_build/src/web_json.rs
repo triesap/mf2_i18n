@@ -14,6 +14,9 @@ use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
     WebArtifactWriteOutput, write_web_artifacts,
 };
+use crate::web_metadata::{
+    WebMessageArg, WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
+};
 use crate::{WebStalePolicy, WebTargetConfig, WebTargetConfigError, WebTargetMode};
 
 const MESSAGES_DIR: &str = "messages";
@@ -160,6 +163,7 @@ pub struct WebJsonExportOutput {
     supported_locales: Vec<String>,
     namespaces: Vec<String>,
     mode: WebJsonMode,
+    message_metadata: Vec<WebMessageMetadata>,
 }
 
 impl WebJsonExportOutput {
@@ -198,6 +202,10 @@ impl WebJsonExportOutput {
     pub fn mode(&self) -> WebJsonMode {
         self.mode
     }
+
+    pub fn message_metadata(&self) -> &[WebMessageMetadata] {
+        &self.message_metadata
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +214,7 @@ pub struct PlainJsonWebBuildOutput {
     default_locale: String,
     supported_locales: Vec<String>,
     namespaces: Vec<String>,
+    message_metadata: Vec<WebMessageMetadata>,
 }
 
 impl PlainJsonWebBuildOutput {
@@ -223,6 +232,10 @@ impl PlainJsonWebBuildOutput {
 
     pub fn namespaces(&self) -> &[String] {
         &self.namespaces
+    }
+
+    pub fn message_metadata(&self) -> &[WebMessageMetadata] {
+        &self.message_metadata
     }
 }
 
@@ -255,6 +268,8 @@ pub enum WebJsonExportError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Metadata(#[from] WebMessageMetadataError),
     #[error(
         "failed to parse i18n message for locale {locale} key {key}: {message} at {line}:{column}"
     )]
@@ -296,6 +311,10 @@ pub enum PlainJsonWebBuildError {
     #[error(transparent)]
     Export(#[from] WebJsonExportError),
     #[error(transparent)]
+    Metadata(#[from] WebMessageMetadataError),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
     Artifacts(#[from] WebArtifactError),
     #[error("missing web target {0}")]
     MissingTarget(String),
@@ -319,6 +338,7 @@ struct PendingExport {
     default_locale: String,
     supported_locales: Vec<String>,
     namespaces: Vec<String>,
+    message_metadata: Vec<WebMessageMetadata>,
 }
 
 pub fn export_web_json(
@@ -361,6 +381,7 @@ pub fn export_web_json(
         supported_locales: pending.supported_locales,
         namespaces: pending.namespaces,
         mode: options.mode(),
+        message_metadata: pending.message_metadata,
     })
 }
 
@@ -391,12 +412,18 @@ pub fn build_plain_json_web_target(
         .iter()
         .map(|file| WebArtifactFile::new(&file.relative_path, file.bytes.clone()))
         .collect::<Result<Vec<_>, _>>()?;
+    artifact_files.push(WebArtifactFile::new("metadata.json", {
+        let mut bytes = serde_json::to_vec_pretty(&pending.message_metadata)?;
+        bytes.push(b'\n');
+        bytes
+    })?);
     artifact_files.push(WebArtifactFile::new(
         "types.ts",
         render_plain_typescript_types(
             &pending.default_locale,
             &pending.supported_locales,
             &pending.namespaces,
+            &pending.message_metadata,
         )
         .into_bytes(),
     )?);
@@ -434,6 +461,7 @@ pub fn build_plain_json_web_target(
         default_locale: pending.default_locale,
         supported_locales: pending.supported_locales,
         namespaces: pending.namespaces,
+        message_metadata: pending.message_metadata,
     })
 }
 
@@ -478,6 +506,11 @@ fn build_plain_pending_export_inner(
     namespace_filter: Option<&[String]>,
 ) -> Result<PendingExport, WebJsonExportError> {
     let supported_locales = catalogs.keys().cloned().collect::<Vec<_>>();
+    let default_catalog = catalogs
+        .get(default_locale)
+        .ok_or_else(|| ProjectCatalogError::MissingDefaultLocale(default_locale.to_owned()))?;
+    let message_metadata =
+        collect_web_message_metadata(default_locale, default_catalog, namespace_filter)?;
     let mut namespaces = BTreeSet::new();
     let mut namespace_maps = BTreeMap::<(String, String), Map<String, Value>>::new();
 
@@ -533,6 +566,7 @@ fn build_plain_pending_export_inner(
         default_locale: default_locale.to_owned(),
         supported_locales,
         namespaces,
+        message_metadata,
     })
 }
 
@@ -679,13 +713,73 @@ fn render_plain_typescript_types(
     default_locale: &str,
     supported_locales: &[String],
     namespaces: &[String],
+    message_metadata: &[WebMessageMetadata],
 ) -> String {
+    let message_ids = if message_metadata.is_empty() {
+        "never".to_string()
+    } else {
+        message_metadata
+            .iter()
+            .map(|message| format!("  | {}", json_string(&message.id)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let message_args = if message_metadata.is_empty() {
+        "Record<never, never>".to_string()
+    } else {
+        let entries = message_metadata
+            .iter()
+            .map(|message| {
+                format!(
+                    "  {}: {};",
+                    json_string(&message.id),
+                    render_message_args_type(&message.args)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{{\n{entries}\n}}")
+    };
+
     format!(
-        "export const DEFAULT_LOCALE = {} as const;\nexport const SUPPORTED_LOCALES = [{}] as const;\nexport type Locale = typeof SUPPORTED_LOCALES[number];\nexport const MESSAGE_NAMESPACES = [{}] as const;\nexport type Namespace = typeof MESSAGE_NAMESPACES[number];\nexport type PlainJsonMessages = Record<string, unknown>;\n",
+        "export const DEFAULT_LOCALE = {} as const;\nexport const SUPPORTED_LOCALES = [{}] as const;\nexport type Locale = typeof SUPPORTED_LOCALES[number];\nexport const MESSAGE_NAMESPACES = [{}] as const;\nexport type Namespace = typeof MESSAGE_NAMESPACES[number];\nexport type MessageId =\n{};\nexport type MessageArgsById = {};\nexport type ArgsFor<TMessageId extends MessageId> = MessageArgsById[TMessageId];\nexport type PlainJsonMessages = Record<string, unknown>;\n",
         json_string(default_locale),
         render_string_array(supported_locales),
         render_string_array(namespaces),
+        message_ids,
+        message_args,
     )
+}
+
+fn render_message_args_type(args: &[WebMessageArg]) -> String {
+    if args.is_empty() {
+        "undefined".to_string()
+    } else {
+        let entries = args
+            .iter()
+            .map(|arg| {
+                format!(
+                    "    readonly {}: {};",
+                    json_string(&arg.name),
+                    render_arg_type(&arg.arg_type)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{{\n{entries}\n  }}")
+    }
+}
+
+fn render_arg_type(arg_type: &crate::model::ArgType) -> &'static str {
+    match arg_type {
+        crate::model::ArgType::String => "string",
+        crate::model::ArgType::Number => "number",
+        crate::model::ArgType::Bool => "boolean",
+        crate::model::ArgType::DateTime => "Date | string | number",
+        crate::model::ArgType::Unit => "{ readonly value: number; readonly unit: string }",
+        crate::model::ArgType::Currency => "{ readonly value: number; readonly currency: string }",
+        crate::model::ArgType::Any => "unknown",
+    }
 }
 
 fn render_plain_typescript_loaders(supported_locales: &[String], namespaces: &[String]) -> String {
@@ -804,6 +898,7 @@ mod tests {
         );
         assert_eq!(output.mode(), WebJsonMode::Plain);
         assert_eq!(output.message_files().len(), 4);
+        assert_eq!(output.message_metadata().len(), 2);
         assert!(output.rerun_if_changed_paths().contains(&config_path));
 
         let common_json =
@@ -844,14 +939,19 @@ mod tests {
             &["en".to_string(), "es".to_string()]
         );
         assert_eq!(output.namespaces(), &["common".to_string()]);
+        assert_eq!(output.message_metadata().len(), 1);
         assert_eq!(output.artifact_output().manifest().target, "docs");
         assert!(out_dir.join(WEB_ARTIFACT_MANIFEST_FILE).exists());
+        assert!(out_dir.join("metadata.json").exists());
         assert!(out_dir.join("messages/en/common.json").exists());
         assert!(!out_dir.join("messages/en/products.json").exists());
 
         let types = fs::read_to_string(out_dir.join("types.ts")).expect("types");
         assert!(types.contains("export type Locale"));
         assert!(types.contains("export type Namespace"));
+        assert!(types.contains("export type MessageId"));
+        assert!(types.contains("\"common.home.title\""));
+        assert!(types.contains("export type ArgsFor"));
 
         let loaders = fs::read_to_string(out_dir.join("loaders.ts")).expect("loaders");
         assert!(loaders.contains("loadMessages"));
