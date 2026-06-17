@@ -1,7 +1,8 @@
 # mf2_i18n Web Hybrid Target RCLD
 
-Status: planned follow-on
+Status: complete
 Created: 2026-06-17
+Completed: 2026-06-17
 Owner: mf2_i18n
 
 ## Goal
@@ -56,7 +57,9 @@ The completed web-generator RCLD provides the required foundations:
 - fixture coverage for plain, runtime, and Docusaurus targets
 - Radroots Platform Docusaurus downstream proof
 
-`hybrid` is currently parsed but rejected by web target validation.
+`hybrid` is now a first-class non-Docusaurus web target mode with static JSON,
+runtime packs, generated TypeScript loaders, CLI support, fixture coverage, and
+documented migration guidance.
 
 ## Out Of Scope
 
@@ -71,6 +74,9 @@ The completed web-generator RCLD provides the required foundations:
 
 ### RCLD-H01: Hybrid Target Validation And Classifier
 
+Status: complete
+Commit: 73a83e6
+
 Enable `hybrid` validation and add a deterministic classifier that splits
 message metadata into static-safe and runtime-required groups.
 
@@ -83,6 +89,9 @@ cargo test -p mf2_i18n_build config
 ```
 
 ### RCLD-H02: Hybrid Artifact Builder
+
+Status: complete
+Commit: f1394d5
 
 Generate the combined artifact set: static JSON, runtime manifests, id maps,
 packs, runtime assets, metadata, and `mf2-web-manifest.json`.
@@ -97,6 +106,9 @@ cargo test -p mf2_i18n_build web
 
 ### RCLD-H03: Hybrid TypeScript Loader API
 
+Status: complete
+Commit: 853f055
+
 Generate one TypeScript API that routes literal messages to static JSON and
 dynamic messages to the WASM runtime while preserving typed message ids and
 arguments.
@@ -110,6 +122,9 @@ cargo test -p mf2_i18n_build hybrid
 
 ### RCLD-H04: `build-web` CLI Hybrid Enablement
 
+Status: complete
+Commit: 83603cd
+
 Wire `mf2_i18n_cli build-web --target <name>` to the hybrid builder, including
 `--check`, output override handling, and typed errors.
 
@@ -122,6 +137,9 @@ cargo test -p mf2_i18n_cli command_build_web
 
 ### RCLD-H05: Fixture App Coverage
 
+Status: complete
+Commit: c6b3649
+
 Add a fixture project with mixed literal and dynamic messages and assert that
 generated outputs and TypeScript loader files are deterministic.
 
@@ -133,6 +151,9 @@ cargo test
 ```
 
 ### RCLD-H06: Product Documentation And Migration Guidance
+
+Status: complete
+Commit: f5182e7
 
 Update `README.md` and `docs/integration.md` with hybrid target usage,
 tradeoffs, output files, and migration guidance from separate plain/runtime
@@ -147,6 +168,9 @@ cargo test
 
 ### RCLD-H07: Final Hybrid Gate
 
+Status: complete
+Commit: final closure checkpoint
+
 Run the final validation matrix, reconcile the generated API against the
 completed plain/runtime/Docusaurus surfaces, and decide whether any downstream
 Radroots Platform fixture should consume hybrid mode.
@@ -158,12 +182,28 @@ cargo fmt --all -- --check
 cargo test
 ```
 
+Downstream decision:
+
+- Docusaurus sites should keep using the Docusaurus-native target because hybrid
+  intentionally rejects Docusaurus framework mode.
+- JavaScript app consumers with mixed literal and dynamic web copy should adopt
+  hybrid as one target instead of parallel `plain-json` and `runtime` targets.
+- The next downstream integration that adopts hybrid must run its own
+  `build-web --target <name> --check` lane and its website E2E tests against
+  the generated hybrid output.
+- Final validation also hardened timestamp-only platform test temporary paths
+  after the full suite exposed a parallel-test collision.
+
+## Final Validation
+
+Final gate:
+
+```sh
+cargo fmt --all -- --check
+cargo test
+git diff --check
+```
+
 ## Next Required RCLD Slices
 
-1. RCLD-H01: Hybrid Target Validation And Classifier
-2. RCLD-H02: Hybrid Artifact Builder
-3. RCLD-H03: Hybrid TypeScript Loader API
-4. RCLD-H04: `build-web` CLI Hybrid Enablement
-5. RCLD-H05: Fixture App Coverage
-6. RCLD-H06: Product Documentation And Migration Guidance
-7. RCLD-H07: Final Hybrid Gate
+None. The hybrid web target RCLD is complete.
