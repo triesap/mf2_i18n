@@ -26,6 +26,7 @@ pub mod project_pipeline;
 pub mod validator;
 pub mod web;
 pub mod web_docusaurus;
+pub mod web_hybrid;
 pub mod web_json;
 pub mod web_metadata;
 pub mod web_runtime;
@@ -58,6 +59,10 @@ pub use crate::web::{
 pub use crate::web_docusaurus::{
     DocusaurusWebBuildError, DocusaurusWebBuildOptions, DocusaurusWebBuildOutput,
     build_docusaurus_web_target,
+};
+pub use crate::web_hybrid::{
+    HybridWebAssets, HybridWebBuildError, HybridWebBuildOptions, HybridWebBuildOutput,
+    build_hybrid_web_target,
 };
 pub use crate::web_json::{
     PlainJsonWebBuildError, PlainJsonWebBuildOptions, PlainJsonWebBuildOutput, WebJsonExportError,
