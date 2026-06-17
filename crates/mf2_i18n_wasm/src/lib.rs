@@ -27,8 +27,7 @@ export type Mf2Arg =
   | boolean
   | { type: "datetime"; unixMilliseconds: number }
   | { type: "datetime"; unixSeconds: number }
-  | { type: "currency"; value: number; code: string }
-  | { type: "unit"; value: number; unitId: number };
+  | { type: "currency"; value: number; code: string };
 "#;
 
 #[wasm_bindgen(js_name = Mf2Runtime)]
@@ -56,6 +55,21 @@ impl Mf2Runtime {
             values.push(&JsValue::from_str(locale.normalized()));
         }
         values
+    }
+
+    #[wasm_bindgen(js_name = negotiateLocale)]
+    pub fn negotiate_locale(&self, requested: JsValue) -> Result<String, JsValue> {
+        let requested = requested_locales_from_js(&requested).map_err(binding_error)?;
+        let requested = requested.iter().map(String::as_str).collect::<Vec<_>>();
+        self.runtime
+            .negotiate_locale(requested)
+            .map_err(WasmBindingError::from)
+            .map_err(binding_error)
+    }
+
+    #[wasm_bindgen(js_name = hasMessage)]
+    pub fn has_message(&self, key: &str) -> bool {
+        self.runtime.has_message(key)
     }
 
     pub fn format(&self, locale: &str, key: &str, args: JsValue) -> Result<String, JsValue> {
@@ -104,9 +118,10 @@ enum WasmBindingError {
     MissingField(&'static str),
     InvalidField(&'static str),
     Json(&'static str, String),
-    Runtime(String),
+    Runtime(RuntimeError),
     InvalidArgs(String),
     UnsupportedArgShape(String),
+    UnsupportedUnitArg(String),
     InvalidCurrencyCode(String),
 }
 
@@ -121,6 +136,12 @@ impl fmt::Display for WasmBindingError {
             Self::UnsupportedArgShape(key) => {
                 write!(formatter, "unsupported argument shape for `{key}`")
             }
+            Self::UnsupportedUnitArg(key) => {
+                write!(
+                    formatter,
+                    "unit arguments are not supported in web bindings for `{key}`"
+                )
+            }
             Self::InvalidCurrencyCode(code) => {
                 write!(formatter, "invalid currency code `{code}`")
             }
@@ -130,12 +151,54 @@ impl fmt::Display for WasmBindingError {
 
 impl From<RuntimeError> for WasmBindingError {
     fn from(source: RuntimeError) -> Self {
-        Self::Runtime(source.to_string())
+        Self::Runtime(source)
     }
 }
 
 fn binding_error(error: WasmBindingError) -> JsValue {
-    js_sys::Error::new(&error.to_string()).into()
+    let code = error.code();
+    let js_error = js_sys::Error::new(&error.to_string());
+    Reflect::set(
+        js_error.as_ref(),
+        &JsValue::from_str("code"),
+        &JsValue::from_str(code),
+    )
+    .ok();
+    js_error.into()
+}
+
+impl WasmBindingError {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::MissingField(_) => "MF2_WASM_MISSING_FIELD",
+            Self::InvalidField(_) => "MF2_WASM_INVALID_FIELD",
+            Self::Json(_, _) => "MF2_WASM_INVALID_JSON",
+            Self::Runtime(source) => match source {
+                RuntimeError::MissingPack(_) => "MF2_RUNTIME_MISSING_PACK",
+                RuntimeError::UnexpectedPack(_) => "MF2_RUNTIME_UNEXPECTED_PACK",
+                RuntimeError::MissingLocale(_) => "MF2_RUNTIME_MISSING_LOCALE",
+                RuntimeError::MissingMessage(_) => "MF2_RUNTIME_MISSING_MESSAGE",
+                RuntimeError::InvalidManifest(_) => "MF2_RUNTIME_INVALID_MANIFEST",
+                RuntimeError::InvalidIdMap => "MF2_RUNTIME_INVALID_ID_MAP",
+                RuntimeError::InvalidHash => "MF2_RUNTIME_INVALID_HASH",
+                RuntimeError::HashMismatch(_) => "MF2_RUNTIME_HASH_MISMATCH",
+                RuntimeError::PackSizeMismatch(_) => "MF2_RUNTIME_PACK_SIZE_MISMATCH",
+                RuntimeError::PackHashMismatch(_) => "MF2_RUNTIME_PACK_HASH_MISMATCH",
+                RuntimeError::PackSchemaMismatch(_) => "MF2_RUNTIME_PACK_SCHEMA_MISMATCH",
+                RuntimeError::PackKindMismatch { .. } => "MF2_RUNTIME_PACK_KIND_MISMATCH",
+                RuntimeError::PackLocaleMismatch { .. } => "MF2_RUNTIME_PACK_LOCALE_MISMATCH",
+                RuntimeError::PackParentMismatch { .. } => "MF2_RUNTIME_PACK_PARENT_MISMATCH",
+                RuntimeError::SignatureFailed => "MF2_RUNTIME_SIGNATURE_FAILED",
+                RuntimeError::Io(_) => "MF2_RUNTIME_IO",
+                RuntimeError::Json(_) => "MF2_RUNTIME_JSON",
+                RuntimeError::Core(_) => "MF2_RUNTIME_CORE",
+            },
+            Self::InvalidArgs(_) => "MF2_WASM_INVALID_ARGS",
+            Self::UnsupportedArgShape(_) => "MF2_WASM_UNSUPPORTED_ARG",
+            Self::UnsupportedUnitArg(_) => "MF2_WASM_UNSUPPORTED_UNIT_ARG",
+            Self::InvalidCurrencyCode(_) => "MF2_WASM_INVALID_CURRENCY_CODE",
+        }
+    }
 }
 
 fn raw_parts_from_js(input: &JsValue) -> Result<RawRuntimeParts, WasmBindingError> {
@@ -159,6 +222,28 @@ fn required_property(input: &JsValue, name: &'static str) -> Result<JsValue, Was
         return Err(WasmBindingError::MissingField(name));
     }
     Ok(value)
+}
+
+fn requested_locales_from_js(value: &JsValue) -> Result<Vec<String>, WasmBindingError> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(Vec::new());
+    }
+    if let Some(locale) = value.as_string() {
+        return Ok(vec![locale]);
+    }
+    if Array::is_array(value) {
+        let array = Array::from(value);
+        let mut locales = Vec::new();
+        for index in 0..array.length() {
+            let locale = array
+                .get(index)
+                .as_string()
+                .ok_or(WasmBindingError::InvalidField("requested"))?;
+            locales.push(locale);
+        }
+        return Ok(locales);
+    }
+    Err(WasmBindingError::InvalidField("requested"))
 }
 
 fn json_bytes_from_js(field: &'static str, value: &JsValue) -> Result<Vec<u8>, WasmBindingError> {
@@ -263,11 +348,7 @@ fn arg_value_from_js(key: &str, value: &JsValue) -> Result<Value, WasmBindingErr
             required_number_property(value, "value")?,
             &required_string_property(value, "code")?,
         ),
-        "unit" => unit_arg(
-            key,
-            required_number_property(value, "value")?,
-            required_number_property(value, "unitId")?,
-        ),
+        "unit" => Err(WasmBindingError::UnsupportedUnitArg(key.to_owned())),
         _ => Err(WasmBindingError::UnsupportedArgShape(key.to_owned())),
     }
 }
@@ -351,11 +432,7 @@ fn arg_value_from_json(key: &str, value: serde_json::Value) -> Result<Value, Was
                     required_json_number(&object, "value")?,
                     required_json_string(&object, "code")?,
                 ),
-                "unit" => unit_arg(
-                    key,
-                    required_json_number(&object, "value")?,
-                    required_json_number(&object, "unitId")?,
-                ),
+                "unit" => Err(WasmBindingError::UnsupportedUnitArg(key.to_owned())),
                 _ => Err(WasmBindingError::UnsupportedArgShape(key.to_owned())),
             }
         }
@@ -430,16 +507,6 @@ fn currency_arg(key: &str, value: f64, code: &str) -> Result<Value, WasmBindingE
     })
 }
 
-fn unit_arg(key: &str, value: f64, unit_id: f64) -> Result<Value, WasmBindingError> {
-    if !value.is_finite() {
-        return Err(WasmBindingError::UnsupportedArgShape(key.to_owned()));
-    }
-    Ok(Value::Unit {
-        value,
-        unit_id: number_to_u32("unitId", unit_id)?,
-    })
-}
-
 fn number_to_i64(field: &'static str, value: f64) -> Result<i64, WasmBindingError> {
     if !value.is_finite()
         || value.fract() != 0.0
@@ -451,22 +518,12 @@ fn number_to_i64(field: &'static str, value: f64) -> Result<i64, WasmBindingErro
     Ok(value as i64)
 }
 
-fn number_to_u32(field: &'static str, value: f64) -> Result<u32, WasmBindingError> {
-    if !value.is_finite()
-        || value.fract() != 0.0
-        || value < u32::MIN as f64
-        || value > u32::MAX as f64
-    {
-        return Err(WasmBindingError::InvalidField(field));
-    }
-    Ok(value as u32)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{Mf2Runtime, RawRuntimeParts, WasmBindingError, args_from_json};
     use mf2_i18n_build::{ProjectRuntimeBuildOptions, build_project_runtime_artifacts};
     use mf2_i18n_core::{DateTimeValue, Value};
+    use mf2_i18n_runtime::RuntimeError;
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -532,6 +589,15 @@ mod tests {
     fn raw_parts_constructor_formats_message() {
         let (root, runtime) = runtime_fixture();
         assert_eq!(runtime.default_locale(), "en");
+        assert_eq!(
+            runtime
+                .runtime
+                .negotiate_locale(["en-GB"])
+                .expect("negotiate"),
+            "en"
+        );
+        assert!(runtime.has_message("common.home.title"));
+        assert!(!runtime.has_message("common.home.missing"));
         let output = runtime
             .format_json_args(
                 "en",
@@ -551,8 +617,7 @@ mod tests {
             "ready": true,
             "created": { "type": "datetime", "unixSeconds": 994550400 },
             "updated": { "type": "datetime", "unixMilliseconds": 994550400000_i64 },
-            "price": { "type": "currency", "value": 12.5, "code": "usd" },
-            "distance": { "type": "unit", "value": 7.25, "unitId": 42 }
+            "price": { "type": "currency", "value": 12.5, "code": "usd" }
         })))
         .expect("args");
 
@@ -571,9 +636,6 @@ mod tests {
         ));
         assert!(
             matches!(args.get("price"), Some(Value::Currency { value, code }) if *value == 12.5 && code == b"USD")
-        );
-        assert!(
-            matches!(args.get("distance"), Some(Value::Unit { value, unit_id }) if *value == 7.25 && *unit_id == 42)
         );
     }
 
@@ -597,5 +659,29 @@ mod tests {
             Err(error) => error,
         };
         assert!(matches!(err, WasmBindingError::InvalidCurrencyCode(code) if code == "US"));
+    }
+
+    #[test]
+    fn json_argument_conversion_rejects_unit_shape_until_supported() {
+        let err = match args_from_json(Some(serde_json::json!({
+            "distance": { "type": "unit", "value": 7.25, "unitId": 42 }
+        }))) {
+            Ok(_) => panic!("unit shape should fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(err, WasmBindingError::UnsupportedUnitArg(ref key) if key == "distance"));
+        assert_eq!(err.code(), "MF2_WASM_UNSUPPORTED_UNIT_ARG");
+    }
+
+    #[test]
+    fn wasm_binding_errors_have_stable_codes() {
+        assert_eq!(
+            WasmBindingError::MissingField("manifest").code(),
+            "MF2_WASM_MISSING_FIELD"
+        );
+        assert_eq!(
+            WasmBindingError::Runtime(RuntimeError::MissingMessage("missing".to_string())).code(),
+            "MF2_RUNTIME_MISSING_MESSAGE"
+        );
     }
 }

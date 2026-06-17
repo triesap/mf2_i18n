@@ -249,6 +249,22 @@ impl Runtime {
         &self.supported
     }
 
+    pub fn negotiate_locale<'a, I>(&self, requested: I) -> RuntimeResult<String>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let requested = requested
+            .into_iter()
+            .map(LanguageTag::parse)
+            .collect::<Result<Vec<_>, _>>()?;
+        let negotiation = negotiate_lookup(&requested, &self.supported, &self.default_locale);
+        Ok(negotiation.selected.normalized().to_string())
+    }
+
+    pub fn has_message(&self, key: &str) -> bool {
+        self.id_map.get(key).is_some()
+    }
+
     pub fn format_with_backend(
         &self,
         locale: &str,
@@ -603,6 +619,19 @@ mod tests {
         let args = Args::new();
         let output = runtime.format("en", "home.title", &args).expect("format");
         assert_eq!(output, "hi");
+    }
+
+    #[test]
+    fn runtime_exposes_negotiation_and_message_presence() {
+        let runtime = Runtime::from_parts(runtime_parts_fixture("home.title", "hi")).expect("load");
+
+        assert_eq!(
+            runtime.negotiate_locale(["en-GB"]).expect("negotiate"),
+            "en"
+        );
+        assert_eq!(runtime.negotiate_locale(Vec::<&str>::new()).unwrap(), "en");
+        assert!(runtime.has_message("home.title"));
+        assert!(!runtime.has_message("home.missing"));
     }
 
     #[test]
