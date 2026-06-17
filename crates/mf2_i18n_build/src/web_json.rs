@@ -571,7 +571,7 @@ fn build_plain_pending_export_inner(
     })
 }
 
-fn plain_text_message(
+pub(crate) fn plain_text_message(
     locale: &str,
     message: &ProjectCatalogMessage,
 ) -> Result<String, WebJsonExportError> {
@@ -626,7 +626,7 @@ fn plain_text_from_ast(
     Ok(output)
 }
 
-fn insert_nested_message(
+pub(crate) fn insert_nested_message(
     map: &mut Map<String, Value>,
     locale: &str,
     message: &ProjectCatalogMessage,

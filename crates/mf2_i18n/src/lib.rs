@@ -4,6 +4,7 @@
 pub use mf2_i18n_build::{
     BuildIoError, CompileError, DocusaurusWebBuildError, DocusaurusWebBuildOptions,
     DocusaurusWebBuildOutput, HybridMessageDelivery, HybridMessagePlan, HybridMessageRoute,
+    HybridWebAssets, HybridWebBuildError, HybridWebBuildOptions, HybridWebBuildOutput,
     NativeModuleBuildError, NativeModuleBuildOptions, NativeModuleBuildOutput,
     PlainJsonWebBuildError, PlainJsonWebBuildOptions, PlainJsonWebBuildOutput, PlatformBundle,
     PlatformBundleError, PlatformBundleManifest, PlatformPack, ProjectCatalog, ProjectCatalogError,
@@ -16,11 +17,11 @@ pub use mf2_i18n_build::{
     WebJsonExportOutput, WebJsonMessageFile, WebJsonMode, WebJsonModeParseError,
     WebJsonUnsupportedKind, WebMessageArg, WebMessageMetadata, WebMessageMetadataError,
     WebStalePolicy, WebTargetConfig, WebTargetConfigError, WebTargetMode,
-    build_docusaurus_web_target, build_native_module, build_plain_json_web_target,
-    build_project_runtime_artifacts, build_runtime_web_target, classify_hybrid_messages,
-    collect_web_message_metadata, export_web_json, infer_web_message_args,
-    load_platform_bundle_manifest, load_project_catalogs, load_project_config,
-    load_project_config_or_default, render_web_typescript_metadata_types,
+    build_docusaurus_web_target, build_hybrid_web_target, build_native_module,
+    build_plain_json_web_target, build_project_runtime_artifacts, build_runtime_web_target,
+    classify_hybrid_messages, collect_web_message_metadata, export_web_json,
+    infer_web_message_args, load_platform_bundle_manifest, load_project_catalogs,
+    load_project_config, load_project_config_or_default, render_web_typescript_metadata_types,
     resolve_config_relative_path, write_platform_bundle_manifest, write_web_artifacts,
 };
 pub use mf2_i18n_core::{
