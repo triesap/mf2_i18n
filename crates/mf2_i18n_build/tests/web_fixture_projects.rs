@@ -1,11 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mf2_i18n_build::{
-    DocusaurusWebBuildOptions, PlainJsonWebBuildOptions, RuntimeWebBuildOptions,
-    build_docusaurus_web_target, build_plain_json_web_target, build_runtime_web_target,
+    DocusaurusWebBuildOptions, HybridWebBuildOptions, PlainJsonWebBuildOptions,
+    RuntimeWebBuildOptions, build_docusaurus_web_target, build_hybrid_web_target,
+    build_plain_json_web_target, build_runtime_web_target,
 };
+
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn temp_dir(name: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
@@ -13,7 +17,11 @@ fn temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    path.push(format!("mf2_i18n_web_fixture_{name}_{nanos}"));
+    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    path.push(format!(
+        "mf2_i18n_web_fixture_{}_{name}_{nanos}_{counter}",
+        std::process::id()
+    ));
     fs::create_dir_all(&path).expect("dir");
     path
 }
@@ -28,7 +36,7 @@ fn write_json_catalog(path: &Path, messages: &[(&str, &str)]) {
 }
 
 #[test]
-fn fixture_projects_cover_plain_runtime_and_docusaurus_targets() {
+fn fixture_projects_cover_plain_runtime_docusaurus_and_hybrid_targets() {
     let plain = write_plain_fixture();
     let plain_output =
         build_plain_json_web_target(&PlainJsonWebBuildOptions::new(&plain, "plain-html"))
@@ -61,6 +69,33 @@ fn fixture_projects_cover_plain_runtime_and_docusaurus_targets() {
     assert!(runtime_loaders.contains("createMf2Runtime"));
     assert!(runtime_loaders.contains("loadLocale"));
 
+    let hybrid = write_hybrid_fixture();
+    let hybrid_output =
+        build_hybrid_web_target(&HybridWebBuildOptions::new(&hybrid, "vite-hybrid"))
+            .expect("hybrid");
+    let hybrid_root = hybrid.parent().expect("hybrid root");
+    assert_eq!(
+        hybrid_output.hybrid_assets().static_message_ids,
+        vec!["home.title".to_string()]
+    );
+    assert_eq!(
+        hybrid_output.hybrid_assets().runtime_message_ids,
+        vec!["home.count".to_string()]
+    );
+    assert!(hybrid_root.join("web/hybrid/hybrid-assets.json").exists());
+    assert!(hybrid_root.join("web/hybrid/runtime-assets.json").exists());
+    assert!(
+        hybrid_root
+            .join("web/hybrid/messages/en/home.json")
+            .exists()
+    );
+    assert!(hybrid_root.join("web/hybrid/packs/en.mf2pack").exists());
+    let hybrid_loaders =
+        fs::read_to_string(hybrid_root.join("web/hybrid/loaders.ts")).expect("hybrid loaders");
+    assert!(hybrid_loaders.contains("STATIC_MESSAGE_LOADERS"));
+    assert!(hybrid_loaders.contains("createMf2Runtime"));
+    assert!(hybrid_loaders.contains("export async function format"));
+
     let docusaurus = write_docusaurus_fixture();
     let docusaurus_output =
         build_docusaurus_web_target(&DocusaurusWebBuildOptions::new(&docusaurus, "docs"))
@@ -80,6 +115,7 @@ fn fixture_projects_cover_plain_runtime_and_docusaurus_targets() {
 
     fs::remove_dir_all(plain_root).ok();
     fs::remove_dir_all(runtime_root).ok();
+    fs::remove_dir_all(hybrid_root).ok();
     fs::remove_dir_all(docusaurus_root).ok();
 }
 
@@ -115,6 +151,26 @@ fn write_runtime_fixture() -> PathBuf {
     fs::write(
         &config_path,
         "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"vite-runtime\"\nmode = \"runtime\"\nframework = \"vite\"\nout_dir = \"web/runtime\"\nrelease_id = \"fixture-runtime\"\ngenerated_at = \"2026-02-01T00:00:00Z\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\"]\n",
+    )
+    .expect("config");
+    config_path
+}
+
+fn write_hybrid_fixture() -> PathBuf {
+    let root = temp_dir("hybrid");
+    for locale in ["en", "es"] {
+        let locale_dir = root.join("locales").join(locale);
+        fs::create_dir_all(&locale_dir).expect("locale");
+        write_json_catalog(
+            &locale_dir.join("home.json"),
+            &[("title", "Welcome"), ("count", "{ $count :number }")],
+        );
+    }
+    fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+    let config_path = root.join("mf2_i18n.toml");
+    fs::write(
+        &config_path,
+        "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"vite-hybrid\"\nmode = \"hybrid\"\nframework = \"vite\"\nout_dir = \"web/hybrid\"\nrelease_id = \"fixture-hybrid\"\ngenerated_at = \"2026-02-01T00:00:00Z\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\"]\n",
     )
     .expect("config");
     config_path
