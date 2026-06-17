@@ -1,0 +1,20 @@
+{
+  "name": "@mf2-i18n/cli",
+  "version": "0.1.0",
+  "description": "Package-script launcher for mf2_i18n web artifact generation.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "bin": {
+    "mf2-i18n": "./bin/mf2-i18n.mjs"
+  },
+  "engines": {
+    "node": ">=20.0"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}
