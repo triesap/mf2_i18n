@@ -24,6 +24,7 @@ pub mod project;
 pub mod project_catalogs;
 pub mod project_pipeline;
 pub mod validator;
+pub mod web;
 pub mod web_json;
 
 pub use crate::compiler::CompileError;
@@ -45,6 +46,11 @@ pub use crate::project_pipeline::{
     NativeModuleBuildError, NativeModuleBuildOptions, NativeModuleBuildOutput,
     ProjectRuntimeBuildOptions, ProjectRuntimeBuildOutput, build_native_module,
     build_project_runtime_artifacts,
+};
+pub use crate::web::{
+    WEB_ARTIFACT_MANIFEST_FILE, WEB_ARTIFACT_MANIFEST_SCHEMA, WebArtifactError, WebArtifactFile,
+    WebArtifactManifest, WebArtifactManifestFile, WebArtifactManifestInput,
+    WebArtifactWriteOptions, WebArtifactWriteOutput, write_web_artifacts,
 };
 pub use crate::web_json::{
     WebJsonExportError, WebJsonExportOptions, WebJsonExportOutput, WebJsonMessageFile, WebJsonMode,

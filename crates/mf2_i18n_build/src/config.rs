@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::error::BuildIoError;
@@ -47,7 +47,7 @@ pub struct WebTargetConfig {
     pub stale_policy: Option<WebStalePolicy>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WebTargetMode {
     PlainJson,
@@ -56,7 +56,7 @@ pub enum WebTargetMode {
     Hybrid,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WebFramework {
     Vanilla,
@@ -66,7 +66,7 @@ pub enum WebFramework {
     Docusaurus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WebStalePolicy {
     Ignore,
