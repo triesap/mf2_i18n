@@ -1,3 +1,10 @@
+import {
+  CliResolutionError,
+  formatResolution,
+  formatResolutionAttempts,
+  resolveRustCli,
+} from './resolve.mjs';
+
 export const packageName = '@mf2-i18n/cli';
 export const packageVersion = '0.1.0';
 
@@ -75,7 +82,7 @@ export function parseArgs(argv) {
   };
 }
 
-export async function runCli(argv, io) {
+export async function runCli(argv, io, runtime = {}) {
   try {
     const parsed = parseArgs(argv);
     if (parsed.kind === 'help') {
@@ -86,11 +93,20 @@ export async function runCli(argv, io) {
       io.stdout.write(`${packageVersion}\n`);
       return 0;
     }
+    if (parsed.command === 'doctor') {
+      const resolution = resolveRustCli(parsed.options, runtime);
+      io.stdout.write(`${formatResolution(resolution)}\n`);
+      return 0;
+    }
     io.stderr.write(`mf2-i18n ${parsed.command} is not wired to mf2_i18n_cli yet\n`);
     return 1;
   } catch (error) {
     if (error instanceof CliUsageError) {
       io.stderr.write(`${error.message}\n\n${usage()}\n`);
+      return 1;
+    }
+    if (error instanceof CliResolutionError) {
+      io.stderr.write(`${error.message}\n${formatResolutionAttempts(error.attempts)}\n`);
       return 1;
     }
     throw error;
