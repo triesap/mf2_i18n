@@ -68,14 +68,24 @@ test('check-web enables check mode', () => {
 });
 
 test('builds Rust build-web arguments', () => {
+  const project = resolve('/tmp/mf2-i18n-project');
+
   assert.deepEqual(
     buildWebArgs('build-web', {
       target: 'docs',
       config: 'locales/mf2_i18n.toml',
       out: 'src/generated/mf2',
       check: false,
-    }),
-    ['build-web', '--target', 'docs', '--config', 'locales/mf2_i18n.toml', '--out', 'src/generated/mf2'],
+    }, project),
+    [
+      'build-web',
+      '--target',
+      'docs',
+      '--config',
+      resolve(project, 'locales/mf2_i18n.toml'),
+      '--out',
+      resolve(project, 'src/generated/mf2'),
+    ],
   );
 
   assert.deepEqual(
@@ -83,8 +93,8 @@ test('builds Rust build-web arguments', () => {
       target: 'docs',
       config: 'mf2_i18n.toml',
       check: true,
-    }),
-    ['build-web', '--target', 'docs', '--config', 'mf2_i18n.toml', '--check'],
+    }, project),
+    ['build-web', '--target', 'docs', '--config', resolve(project, 'mf2_i18n.toml'), '--check'],
   );
 });
 
@@ -194,9 +204,9 @@ test('build-web invokes an explicit Rust CLI binary', async () => {
     '--target',
     'docs',
     '--config',
-    'locales/mf2_i18n.toml',
+    resolve(root, 'locales/mf2_i18n.toml'),
     '--out',
-    'src/generated/mf2',
+    resolve(root, 'src/generated/mf2'),
   ]);
 });
 
@@ -213,7 +223,14 @@ test('check-web invokes build-web with check mode', async () => {
   );
 
   assert.equal(result.exitCode, 0);
-  assert.deepEqual(calls[0].args, ['build-web', '--target', 'docs', '--config', 'mf2_i18n.toml', '--check']);
+  assert.deepEqual(calls[0].args, [
+    'build-web',
+    '--target',
+    'docs',
+    '--config',
+    resolve(root, 'mf2_i18n.toml'),
+    '--check',
+  ]);
 });
 
 test('build-web appends arguments after cargo manifest launcher args', async () => {
@@ -245,7 +262,7 @@ test('build-web appends arguments after cargo manifest launcher args', async () 
     '--target',
     'docs',
     '--config',
-    'mf2_i18n.toml',
+    resolve(root, 'mf2_i18n.toml'),
   ]);
 });
 

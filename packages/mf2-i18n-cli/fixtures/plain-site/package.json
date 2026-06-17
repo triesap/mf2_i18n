@@ -1,0 +1,12 @@
+{
+  "name": "mf2-i18n-plain-site-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mf2:gen": "mf2-i18n build-web --config mf2_i18n.toml --target plain-site",
+    "mf2:check": "mf2-i18n check-web --config mf2_i18n.toml --target plain-site"
+  },
+  "devDependencies": {
+    "@mf2-i18n/cli": "0.1.0"
+  }
+}
