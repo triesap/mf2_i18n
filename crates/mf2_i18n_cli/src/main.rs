@@ -4,9 +4,13 @@ mod cli;
 mod command_build;
 mod command_build_web;
 mod command_coverage;
+mod command_detect;
+mod command_doctor;
 mod command_export_web_json;
 mod command_extract;
+mod command_init;
 mod command_pseudo;
+mod command_scaffold;
 mod command_sign;
 mod command_validate;
 
