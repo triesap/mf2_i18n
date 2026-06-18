@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {dirname, resolve} from 'node:path';
-import {buildWebArgs, packageVersion, parseArgs, runCli} from '../src/cli.mjs';
+import {buildRustArgs, buildWebArgs, packageVersion, parseArgs, runCli} from '../src/cli.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -18,7 +18,7 @@ test('package exposes the mf2-i18n bin', async () => {
 test('prints help and version', async () => {
   const help = await capture(['--help']);
   assert.equal(help.exitCode, 0);
-  assert.match(help.stdout, /mf2-i18n build-web/);
+  assert.match(help.stdout, /mf2-i18n build --target/);
 
   const version = await capture(['--version']);
   assert.equal(version.exitCode, 0);
@@ -47,11 +47,16 @@ test('parses build-web options', () => {
   assert.deepEqual(parsed, {
     kind: 'command',
     command: 'build-web',
+    subcommand: undefined,
     options: {
       config: 'locales/mf2_i18n.toml',
       target: 'docs',
       out: 'src/generated/mf2',
       cwd: 'site',
+      preset: undefined,
+      sourceLayout: undefined,
+      source: undefined,
+      locale: undefined,
       cliBin: './bin/mf2_i18n_cli',
       manifestPath: './mf2_i18n/Cargo.toml',
       check: true,
@@ -65,6 +70,29 @@ test('check-web enables check mode', () => {
   assert.equal(parsed.command, 'check-web');
   assert.equal(parsed.options.config, 'mf2_i18n.toml');
   assert.equal(parsed.options.check, true);
+});
+
+test('parses public command options', () => {
+  const build = parseArgs(['build', '--target', 'docs']);
+  assert.equal(build.command, 'build');
+  assert.equal(build.options.target, 'docs');
+
+  const check = parseArgs(['check', '--target', 'docs']);
+  assert.equal(check.command, 'check');
+  assert.equal(check.options.check, true);
+
+  const scaffold = parseArgs([
+    'scaffold',
+    'missing',
+    '--source',
+    'site',
+    '--locale',
+    'es',
+  ]);
+  assert.equal(scaffold.command, 'scaffold');
+  assert.equal(scaffold.subcommand, 'missing');
+  assert.equal(scaffold.options.source, 'site');
+  assert.equal(scaffold.options.locale, 'es');
 });
 
 test('builds Rust build-web arguments', () => {
@@ -98,6 +126,73 @@ test('builds Rust build-web arguments', () => {
   );
 });
 
+test('builds Rust public command arguments', () => {
+  const project = resolve('/tmp/mf2-i18n-project');
+
+  assert.deepEqual(
+    buildRustArgs('build', undefined, {
+      target: 'docs',
+      config: 'locales/mf2_i18n.toml',
+      out: 'src/generated/mf2',
+    }, project),
+    [
+      'build',
+      '--target',
+      'docs',
+      '--config',
+      resolve(project, 'locales/mf2_i18n.toml'),
+      '--out',
+      resolve(project, 'src/generated/mf2'),
+    ],
+  );
+
+  assert.deepEqual(
+    buildRustArgs('check', undefined, {
+      target: 'docs',
+      config: 'mf2_i18n.toml',
+    }, project),
+    ['check', '--target', 'docs', '--config', resolve(project, 'mf2_i18n.toml')],
+  );
+
+  assert.deepEqual(
+    buildRustArgs('init', undefined, {
+      config: 'mf2_i18n.toml',
+      preset: 'react',
+      sourceLayout: 'namespace-locale',
+      target: 'app',
+    }, project),
+    [
+      'init',
+      '--config',
+      resolve(project, 'mf2_i18n.toml'),
+      '--preset',
+      'react',
+      '--source-layout',
+      'namespace-locale',
+      '--target',
+      'app',
+    ],
+  );
+
+  assert.deepEqual(
+    buildRustArgs('scaffold', 'missing', {
+      source: 'site',
+      locale: 'es',
+      config: 'mf2_i18n.toml',
+    }, project),
+    [
+      'scaffold',
+      'missing',
+      '--source',
+      'site',
+      '--locale',
+      'es',
+      '--config',
+      resolve(project, 'mf2_i18n.toml'),
+    ],
+  );
+});
+
 test('reports unknown commands and missing targets', async () => {
   const unknown = await capture(['sync-web']);
   assert.equal(unknown.exitCode, 1);
@@ -108,16 +203,20 @@ test('reports unknown commands and missing targets', async () => {
   assert.match(missingTarget.stderr, /build-web requires --target <name>/);
 });
 
-test('doctor resolves an explicit cli binary', async () => {
+test('doctor invokes an explicit Rust CLI binary', async () => {
   const root = await testRoot('explicit-bin');
   const bin = resolve(root, 'mf2_i18n_cli');
   await writeFile(bin, '#!/bin/sh\nexit 0\n');
   await chmod(bin, 0o755);
+  const calls = [];
 
-  const result = await capture(['doctor', '--cli-bin', bin], {cwd: root});
+  const result = await capture(
+    ['doctor', '--config', 'mf2_i18n.toml', '--cli-bin', bin],
+    {cwd: root, spawn: async (call) => recordCall(calls, call, {status: 0})},
+  );
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /strategy: cli-bin/);
-  assert.match(result.stdout, new RegExp(escapeRegExp(bin)));
+  assert.equal(calls[0].command, bin);
+  assert.deepEqual(calls[0].args, ['doctor', '--config', resolve(root, 'mf2_i18n.toml')]);
 });
 
 test('doctor resolves package cliBin config', async () => {
@@ -131,9 +230,13 @@ test('doctor resolves package cliBin config', async () => {
     JSON.stringify({mf2_i18n: {cliBin: './vendor/mf2_i18n_cli'}}, null, 2),
   );
 
-  const result = await capture(['doctor'], {cwd: root});
+  const calls = [];
+  const result = await capture(
+    ['doctor'],
+    {cwd: root, spawn: async (call) => recordCall(calls, call, {status: 0})},
+  );
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /strategy: package mf2_i18n\.cliBin/);
+  assert.equal(calls[0].command, bin);
 });
 
 test('doctor resolves manifest path through cargo', async () => {
@@ -142,13 +245,27 @@ test('doctor resolves manifest path through cargo', async () => {
   await mkdir(dirname(manifest), {recursive: true});
   await writeFile(manifest, '[workspace]\n');
 
+  const calls = [];
   const result = await capture(['doctor', '--manifest-path', manifest], {
     cwd: root,
     env: {CARGO: '/custom/cargo'},
+    spawn: async (call) => recordCall(calls, call, {status: 0}),
   });
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /strategy: manifest-path/);
-  assert.match(result.stdout, /command: \/custom\/cargo run --manifest-path/);
+  assert.equal(calls[0].command, '/custom/cargo');
+  assert.deepEqual(calls[0].args.slice(0, 6), [
+    'run',
+    '--manifest-path',
+    manifest,
+    '-p',
+    'mf2_i18n_cli',
+    '--',
+  ]);
+  assert.deepEqual(calls[0].args.slice(6), [
+    'doctor',
+    '--config',
+    resolve(root, 'mf2_i18n.toml'),
+  ]);
 });
 
 test('doctor resolves an adjacent source checkout', async () => {
@@ -159,9 +276,21 @@ test('doctor resolves an adjacent source checkout', async () => {
   await writeFile(resolve(root, 'Cargo.toml'), '[workspace]\n');
   await writeFile(resolve(root, 'crates/mf2_i18n_cli/Cargo.toml'), '[package]\nname = "mf2_i18n_cli"\n');
 
-  const result = await capture(['doctor'], {cwd: resolve(root, 'site'), packageRoot});
+  const calls = [];
+  const result = await capture(
+    ['doctor'],
+    {
+      cwd: resolve(root, 'site'),
+      packageRoot,
+      spawn: async (call) => recordCall(calls, call, {status: 0}),
+    },
+  );
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /strategy: adjacent source checkout/);
+  assert.deepEqual(calls[0].args.slice(-3), [
+    'doctor',
+    '--config',
+    resolve(root, 'site/mf2_i18n.toml'),
+  ]);
 });
 
 test('doctor reports all failed resolution attempts', async () => {
@@ -207,6 +336,43 @@ test('build-web invokes an explicit Rust CLI binary', async () => {
     resolve(root, 'locales/mf2_i18n.toml'),
     '--out',
     resolve(root, 'src/generated/mf2'),
+  ]);
+});
+
+test('build and check invoke public Rust commands', async () => {
+  const root = await testRoot('run-public');
+  const bin = resolve(root, 'mf2_i18n_cli');
+  await writeFile(bin, '#!/bin/sh\nexit 0\n');
+  await chmod(bin, 0o755);
+  const calls = [];
+
+  const build = await capture(
+    ['build', '--target', 'docs', '--out', 'src/generated/mf2', '--cli-bin', bin],
+    {cwd: root, spawn: async (call) => recordCall(calls, call, {status: 0})},
+  );
+  assert.equal(build.exitCode, 0);
+
+  const check = await capture(
+    ['check', '--target', 'docs', '--cli-bin', bin],
+    {cwd: root, spawn: async (call) => recordCall(calls, call, {status: 0})},
+  );
+  assert.equal(check.exitCode, 0);
+
+  assert.deepEqual(calls[0].args, [
+    'build',
+    '--target',
+    'docs',
+    '--config',
+    resolve(root, 'mf2_i18n.toml'),
+    '--out',
+    resolve(root, 'src/generated/mf2'),
+  ]);
+  assert.deepEqual(calls[1].args, [
+    'check',
+    '--target',
+    'docs',
+    '--config',
+    resolve(root, 'mf2_i18n.toml'),
   ]);
 });
 
@@ -312,10 +478,6 @@ async function testRoot(name) {
   );
   await mkdir(root, {recursive: true});
   return root;
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function recordCall(calls, call, result) {

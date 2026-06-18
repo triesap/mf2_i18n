@@ -18,7 +18,7 @@ test('plain site fixture builds and checks through the source checkout launcher'
 
   try {
     runLauncher([
-      'build-web',
+      'build',
       '--cwd',
       workRoot,
       '--config',
@@ -42,7 +42,7 @@ test('plain site fixture builds and checks through the source checkout launcher'
     await readFile(resolve(workRoot, 'generated/mf2/types.ts'), 'utf8');
 
     runLauncher([
-      'check-web',
+      'check',
       '--cwd',
       workRoot,
       '--config',
