@@ -134,6 +134,7 @@ mod tests {
         fs::write(
             &config_path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
@@ -186,6 +187,7 @@ out_dir = "web-generated"
         fs::write(
             &config_path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
@@ -238,6 +240,7 @@ generated_at = "2026-02-01T00:00:00Z"
         fs::write(
             &config_path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
@@ -302,6 +305,7 @@ namespaces = ["common"]
         fs::write(
             &config_path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"

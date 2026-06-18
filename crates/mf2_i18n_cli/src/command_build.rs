@@ -35,15 +35,14 @@ mod tests {
     use mf2_i18n_build::NativeModuleBuildError;
     use std::fs;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
     fn temp_dir() -> PathBuf {
         let mut path = std::env::temp_dir();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        path.push(format!("mf2_i18n_build_{nanos}"));
+        let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        path.push(format!("mf2_i18n_build_{}_{}", std::process::id(), id));
         fs::create_dir_all(&path).expect("dir");
         path
     }
@@ -63,7 +62,8 @@ mod tests {
         let config_path = dir.join("mf2_i18n.toml");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
         )
         .expect("config");
 
@@ -104,7 +104,8 @@ mod tests {
         let config_path = dir.join("mf2_i18n.toml");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
         )
         .expect("config");
 

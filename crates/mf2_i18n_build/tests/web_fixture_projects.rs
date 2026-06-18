@@ -130,7 +130,8 @@ fn write_plain_fixture() -> PathBuf {
     let config_path = root.join("mf2_i18n.toml");
     fs::write(
         &config_path,
-        "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"plain-html\"\nmode = \"plain-json\"\nframework = \"vanilla\"\nout_dir = \"web/plain\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\"]\n",
+        "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"plain-html\"\nmode = \"plain-json\"\nframework = \"vanilla\"\nout_dir = \"web/plain\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\"]\n",
     )
     .expect("config");
     config_path
@@ -150,7 +151,8 @@ fn write_runtime_fixture() -> PathBuf {
     let config_path = root.join("mf2_i18n.toml");
     fs::write(
         &config_path,
-        "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"vite-runtime\"\nmode = \"runtime\"\nframework = \"vite\"\nout_dir = \"web/runtime\"\nrelease_id = \"fixture-runtime\"\ngenerated_at = \"2026-02-01T00:00:00Z\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\"]\n",
+        "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"vite-runtime\"\nmode = \"runtime\"\nframework = \"vite\"\nout_dir = \"web/runtime\"\nrelease_id = \"fixture-runtime\"\ngenerated_at = \"2026-02-01T00:00:00Z\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\"]\n",
     )
     .expect("config");
     config_path
@@ -170,7 +172,8 @@ fn write_hybrid_fixture() -> PathBuf {
     let config_path = root.join("mf2_i18n.toml");
     fs::write(
         &config_path,
-        "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"vite-hybrid\"\nmode = \"hybrid\"\nframework = \"vite\"\nout_dir = \"web/hybrid\"\nrelease_id = \"fixture-hybrid\"\ngenerated_at = \"2026-02-01T00:00:00Z\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\"]\n",
+        "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"vite-hybrid\"\nmode = \"hybrid\"\nframework = \"vite\"\nout_dir = \"web/hybrid\"\nrelease_id = \"fixture-hybrid\"\ngenerated_at = \"2026-02-01T00:00:00Z\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\"]\n",
     )
     .expect("config");
     config_path
@@ -205,7 +208,8 @@ fn write_docusaurus_fixture() -> PathBuf {
     let config_path = root.join("mf2_i18n.toml");
     fs::write(
         &config_path,
-        "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"docs\"\nmode = \"docusaurus\"\nframework = \"docusaurus\"\nout_dir = \"generated\"\ndocs_source_dir = \"docs\"\ndocusaurus_i18n_dir = \"i18n\"\ndocusaurus_sidebar_id = \"guideSidebar\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\", \"docs\", \"docusaurus\"]\n",
+        "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"docs\"\nmode = \"docusaurus\"\nframework = \"docusaurus\"\nout_dir = \"generated\"\ndocs_source_dir = \"docs\"\ndocusaurus_i18n_dir = \"i18n\"\ndocusaurus_sidebar_id = \"guideSidebar\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\", \"docs\", \"docusaurus\"]\n",
     )
     .expect("config");
     config_path

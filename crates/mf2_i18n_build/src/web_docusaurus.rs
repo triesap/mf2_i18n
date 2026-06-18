@@ -951,7 +951,8 @@ mod tests {
         let config_path = root.join("mf2_i18n.toml");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"docs\"\nmode = \"docusaurus\"\nframework = \"docusaurus\"\nout_dir = \"src/generated/mf2\"\ndocs_source_dir = \"docs\"\ndocusaurus_i18n_dir = \"i18n\"\ndocusaurus_sidebar_id = \"radrootsSidebar\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\", \"docs\", \"docusaurus\"]\nstale_policy = \"fail\"\n",
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"docs\"\nmode = \"docusaurus\"\nframework = \"docusaurus\"\nout_dir = \"src/generated/mf2\"\ndocs_source_dir = \"docs\"\ndocusaurus_i18n_dir = \"i18n\"\ndocusaurus_sidebar_id = \"radrootsSidebar\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"home\", \"docs\", \"docusaurus\"]\nstale_policy = \"fail\"\n",
         )
         .expect("config");
         config_path

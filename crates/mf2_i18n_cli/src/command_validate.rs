@@ -162,7 +162,8 @@ mod tests {
         let config_path = dir.join("mf2_i18n.toml");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
         )
         .expect("config");
 

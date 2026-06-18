@@ -8,4 +8,6 @@ pub enum BuildIoError {
     Json(#[from] serde_json::Error),
     #[error("toml error: {0}")]
     Toml(#[from] toml::de::Error),
+    #[error("config error: {0}")]
+    Config(String),
 }

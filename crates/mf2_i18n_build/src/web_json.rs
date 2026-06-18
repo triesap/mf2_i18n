@@ -790,7 +790,8 @@ mod tests {
         let config_path = root.join("mf2_i18n.toml");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n",
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n",
         )
         .expect("config");
         config_path
@@ -800,7 +801,8 @@ mod tests {
         let config_path = root.join("mf2_i18n.toml");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"docs\"\nmode = \"plain-json\"\nframework = \"docusaurus\"\nout_dir = \"web-generated\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"common\"]\nstale_policy = \"fail\"\n",
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[web.targets]]\nname = \"docs\"\nmode = \"plain-json\"\nframework = \"docusaurus\"\nout_dir = \"web-generated\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"common\"]\nstale_policy = \"fail\"\n",
         )
         .expect("config");
         config_path

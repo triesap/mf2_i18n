@@ -6,14 +6,68 @@ use thiserror::Error;
 
 use crate::error::BuildIoError;
 
+pub const PROJECT_CONFIG_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProjectConfig {
+    #[serde(default)]
+    pub version: u32,
     pub default_locale: String,
+    #[serde(default)]
+    pub locales: Vec<String>,
+    #[serde(default)]
+    pub sources: Vec<SourceConfig>,
+    #[serde(default)]
+    pub targets: Vec<ProjectTargetConfig>,
+    #[serde(default)]
     pub source_dirs: Vec<String>,
+    #[serde(default = "default_micro_locales_registry")]
     pub micro_locales_registry: Option<String>,
+    #[serde(default = "default_project_salt_path")]
     pub project_salt_path: String,
     #[serde(default)]
     pub web: WebConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SourceConfig {
+    pub name: String,
+    pub layout: SourceLayout,
+    pub root: String,
+    #[serde(default)]
+    pub namespace_glob: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceLayout {
+    LocaleNamespace,
+    NamespaceLocale,
+    SingleLocaleFile,
+    DocusaurusDocs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ProjectTargetConfig {
+    pub name: String,
+    pub source: String,
+    pub preset: WebPreset,
+    pub out_dir: String,
+    #[serde(default)]
+    pub typescript: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WebPreset {
+    Vanilla,
+    Vite,
+    React,
+    Svelte,
+    Sveltekit,
+    Next,
+    Astro,
+    Docusaurus,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -64,7 +118,10 @@ pub enum WebFramework {
     Vanilla,
     React,
     Svelte,
+    Sveltekit,
     Vite,
+    Next,
+    Astro,
     Docusaurus,
 }
 
@@ -104,10 +161,55 @@ pub enum WebTargetConfigError {
     DocusaurusFrameworkMismatch { target: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ProjectConfigError {
+    #[error("project config version is required")]
+    MissingVersion,
+    #[error("unsupported project config version {found}; expected {expected}")]
+    UnsupportedVersion { found: u32, expected: u32 },
+    #[error("default_locale must not be empty")]
+    EmptyDefaultLocale,
+    #[error("locale entries must not be empty")]
+    EmptyLocale,
+    #[error("duplicate locale {0}")]
+    DuplicateLocale(String),
+    #[error("default_locale {0} must be listed in locales")]
+    DefaultLocaleNotListed(String),
+    #[error("project config must declare at least one source")]
+    NoSources,
+    #[error("source name must not be empty")]
+    EmptySourceName,
+    #[error("duplicate source name {0}")]
+    DuplicateSourceName(String),
+    #[error("source {source_name} root must not be empty")]
+    EmptySourceRoot { source_name: String },
+    #[error("target name must not be empty")]
+    EmptyTargetName,
+    #[error("duplicate target name {0}")]
+    DuplicateTargetName(String),
+    #[error("target {target} source must not be empty")]
+    EmptyTargetSource { target: String },
+    #[error("target {target} references unknown source {source_name}")]
+    UnknownTargetSource { target: String, source_name: String },
+    #[error("target {target} out_dir must not be empty")]
+    EmptyTargetOutDir { target: String },
+    #[error(transparent)]
+    Web(#[from] WebTargetConfigError),
+}
+
 impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
+            version: PROJECT_CONFIG_VERSION,
             default_locale: "en".to_string(),
+            locales: vec!["en".to_string()],
+            sources: vec![SourceConfig {
+                name: "default".to_string(),
+                layout: SourceLayout::LocaleNamespace,
+                root: "locales".to_string(),
+                namespace_glob: Some("*.mf2".to_string()),
+            }],
+            targets: Vec::new(),
             source_dirs: vec!["locales".to_string()],
             micro_locales_registry: Some("micro-locales.toml".to_string()),
             project_salt_path: "id_salt.txt".to_string(),
@@ -117,8 +219,56 @@ impl Default for ProjectConfig {
 }
 
 impl ProjectConfig {
+    pub fn validate(&self) -> Result<(), ProjectConfigError> {
+        validate_version(self.version)?;
+        validate_locales(&self.default_locale, &self.locales)?;
+        validate_sources(&self.sources)?;
+        validate_targets(&self.targets, &self.sources)?;
+        self.web.validate()?;
+        Ok(())
+    }
+
     pub fn validate_web_targets(&self) -> Result<(), WebTargetConfigError> {
         self.web.validate()
+    }
+
+    fn normalize(&mut self) -> Result<(), ProjectConfigError> {
+        validate_version(self.version)?;
+        if self.locales.is_empty() {
+            self.locales.push(self.default_locale.clone());
+        }
+        if self.sources.is_empty() && !self.source_dirs.is_empty() {
+            self.sources = self
+                .source_dirs
+                .iter()
+                .enumerate()
+                .map(|(index, root)| SourceConfig {
+                    name: if index == 0 {
+                        "default".to_string()
+                    } else {
+                        format!("source-{}", index + 1)
+                    },
+                    layout: SourceLayout::LocaleNamespace,
+                    root: root.clone(),
+                    namespace_glob: Some("*.mf2".to_string()),
+                })
+                .collect();
+        }
+        if self.source_dirs.is_empty() {
+            self.source_dirs = self
+                .sources
+                .iter()
+                .map(|source| source.root.clone())
+                .collect();
+        }
+        if self.web.targets.is_empty() && !self.targets.is_empty() {
+            self.web.targets = self
+                .targets
+                .iter()
+                .map(WebTargetConfig::from_public_target)
+                .collect();
+        }
+        self.validate()
     }
 }
 
@@ -142,6 +292,25 @@ impl WebConfig {
 }
 
 impl WebTargetConfig {
+    fn from_public_target(target: &ProjectTargetConfig) -> Self {
+        let (mode, framework) = target.preset.web_target_shape();
+        Self {
+            name: target.name.clone(),
+            mode,
+            framework,
+            out_dir: target.out_dir.clone(),
+            asset_dir: None,
+            locales: Vec::new(),
+            namespaces: Vec::new(),
+            docs_source_dir: target.preset.is_docusaurus().then(|| "docs".to_string()),
+            docusaurus_i18n_dir: target.preset.is_docusaurus().then(|| "i18n".to_string()),
+            docusaurus_sidebar_id: None,
+            generated_at: None,
+            release_id: None,
+            stale_policy: None,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), WebTargetConfigError> {
         if self.name.trim().is_empty() {
             return Err(WebTargetConfigError::EmptyTargetName);
@@ -243,9 +412,130 @@ impl WebTargetConfig {
     }
 }
 
+impl WebPreset {
+    fn web_target_shape(self) -> (WebTargetMode, Option<WebFramework>) {
+        match self {
+            Self::Vanilla => (WebTargetMode::PlainJson, Some(WebFramework::Vanilla)),
+            Self::Vite => (WebTargetMode::Hybrid, Some(WebFramework::Vite)),
+            Self::React => (WebTargetMode::Hybrid, Some(WebFramework::React)),
+            Self::Svelte => (WebTargetMode::Hybrid, Some(WebFramework::Svelte)),
+            Self::Sveltekit => (WebTargetMode::Hybrid, Some(WebFramework::Sveltekit)),
+            Self::Next => (WebTargetMode::Hybrid, Some(WebFramework::Next)),
+            Self::Astro => (WebTargetMode::Hybrid, Some(WebFramework::Astro)),
+            Self::Docusaurus => (WebTargetMode::Docusaurus, Some(WebFramework::Docusaurus)),
+        }
+    }
+
+    fn is_docusaurus(self) -> bool {
+        matches!(self, Self::Docusaurus)
+    }
+}
+
+fn default_micro_locales_registry() -> Option<String> {
+    Some("micro-locales.toml".to_string())
+}
+
+fn default_project_salt_path() -> String {
+    "id_salt.txt".to_string()
+}
+
+fn validate_version(version: u32) -> Result<(), ProjectConfigError> {
+    if version == 0 {
+        return Err(ProjectConfigError::MissingVersion);
+    }
+    if version != PROJECT_CONFIG_VERSION {
+        return Err(ProjectConfigError::UnsupportedVersion {
+            found: version,
+            expected: PROJECT_CONFIG_VERSION,
+        });
+    }
+    Ok(())
+}
+
+fn validate_locales(default_locale: &str, locales: &[String]) -> Result<(), ProjectConfigError> {
+    if default_locale.trim().is_empty() {
+        return Err(ProjectConfigError::EmptyDefaultLocale);
+    }
+    if locales.iter().any(|locale| locale.trim().is_empty()) {
+        return Err(ProjectConfigError::EmptyLocale);
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for locale in locales {
+        if !seen.insert(locale.clone()) {
+            return Err(ProjectConfigError::DuplicateLocale(locale.clone()));
+        }
+    }
+    if !locales.iter().any(|locale| locale == default_locale) {
+        return Err(ProjectConfigError::DefaultLocaleNotListed(
+            default_locale.to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_sources(sources: &[SourceConfig]) -> Result<(), ProjectConfigError> {
+    if sources.is_empty() {
+        return Err(ProjectConfigError::NoSources);
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for source in sources {
+        if source.name.trim().is_empty() {
+            return Err(ProjectConfigError::EmptySourceName);
+        }
+        if source.root.trim().is_empty() {
+            return Err(ProjectConfigError::EmptySourceRoot {
+                source_name: source.name.clone(),
+            });
+        }
+        if !names.insert(source.name.clone()) {
+            return Err(ProjectConfigError::DuplicateSourceName(source.name.clone()));
+        }
+    }
+    Ok(())
+}
+
+fn validate_targets(
+    targets: &[ProjectTargetConfig],
+    sources: &[SourceConfig],
+) -> Result<(), ProjectConfigError> {
+    let source_names = sources
+        .iter()
+        .map(|source| source.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut target_names = std::collections::BTreeSet::new();
+    for target in targets {
+        if target.name.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyTargetName);
+        }
+        if !target_names.insert(target.name.clone()) {
+            return Err(ProjectConfigError::DuplicateTargetName(target.name.clone()));
+        }
+        if target.source.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyTargetSource {
+                target: target.name.clone(),
+            });
+        }
+        if !source_names.contains(target.source.as_str()) {
+            return Err(ProjectConfigError::UnknownTargetSource {
+                target: target.name.clone(),
+                source_name: target.source.clone(),
+            });
+        }
+        if target.out_dir.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyTargetOutDir {
+                target: target.name.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
 pub fn load_project_config(path: &Path) -> Result<ProjectConfig, BuildIoError> {
     let contents = fs::read_to_string(path)?;
-    let config = toml::from_str(&contents)?;
+    let mut config: ProjectConfig = toml::from_str(&contents)?;
+    config
+        .normalize()
+        .map_err(|err| BuildIoError::Config(err.to_string()))?;
     Ok(config)
 }
 
@@ -260,9 +550,10 @@ pub fn load_project_config_or_default(path: &Path) -> Result<ProjectConfig, Buil
 #[cfg(test)]
 mod tests {
     use super::{
-        ProjectConfig, WebFramework, WebStalePolicy, WebTargetConfigError, WebTargetMode,
+        PROJECT_CONFIG_VERSION, ProjectConfig, WebFramework, WebStalePolicy, WebTargetMode,
         load_project_config_or_default,
     };
+    use crate::error::BuildIoError;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -288,6 +579,7 @@ mod tests {
     fn loads_from_file() {
         let path = temp_path("config");
         let contents = r#"
+version = 1
 default_locale = "fr"
 source_dirs = ["locales"]
 micro_locales_registry = "micro-locales.toml"
@@ -296,6 +588,9 @@ project_salt_path = "id_salt.txt"
         fs::write(&path, contents).expect("write");
         let config = load_project_config_or_default(&path).expect("config");
         assert_eq!(config.default_locale, "fr");
+        assert_eq!(config.version, PROJECT_CONFIG_VERSION);
+        assert_eq!(config.locales, ["fr".to_string()]);
+        assert_eq!(config.sources[0].root, "locales");
         assert!(config.web.targets.is_empty());
         fs::remove_file(&path).ok();
     }
@@ -303,9 +598,136 @@ project_salt_path = "id_salt.txt"
     #[test]
     fn default_values_are_stable() {
         let config = ProjectConfig::default();
+        assert_eq!(config.version, PROJECT_CONFIG_VERSION);
         assert_eq!(config.project_salt_path, "id_salt.txt");
+        assert_eq!(config.sources[0].root, "locales");
         assert!(config.web.targets.is_empty());
+        assert!(config.validate().is_ok());
         assert!(config.validate_web_targets().is_ok());
+    }
+
+    #[test]
+    fn loads_public_v1_config_contract() {
+        let path = temp_path("public_v1");
+        fs::write(
+            &path,
+            r#"
+version = 1
+default_locale = "en"
+locales = ["en", "es"]
+
+[[sources]]
+name = "site"
+layout = "locale-namespace"
+root = "locales"
+namespace_glob = "*.mf2"
+
+[[targets]]
+name = "web"
+source = "site"
+preset = "react"
+out_dir = "src/generated/mf2"
+typescript = true
+"#,
+        )
+        .expect("write");
+
+        let config = load_project_config_or_default(&path).expect("config");
+        assert_eq!(config.project_salt_path, "id_salt.txt");
+        assert_eq!(config.source_dirs, ["locales".to_string()]);
+        let target = config.web.target("web").expect("target");
+        assert_eq!(target.mode, WebTargetMode::Hybrid);
+        assert_eq!(target.framework, Some(WebFramework::React));
+        assert!(config.validate().is_ok());
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_missing_config_version() {
+        let path = temp_path("missing_version");
+        fs::write(
+            &path,
+            r#"
+default_locale = "en"
+locales = ["en"]
+
+[[sources]]
+name = "site"
+layout = "locale-namespace"
+root = "locales"
+"#,
+        )
+        .expect("write");
+
+        let err = load_project_config_or_default(&path).expect_err("version error");
+        assert!(
+            matches!(err, BuildIoError::Config(message) if message == "project config version is required")
+        );
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_unknown_config_version() {
+        let path = temp_path("unknown_version");
+        fs::write(
+            &path,
+            r#"
+version = 2
+default_locale = "en"
+locales = ["en"]
+
+[[sources]]
+name = "site"
+layout = "locale-namespace"
+root = "locales"
+"#,
+        )
+        .expect("write");
+
+        let err = load_project_config_or_default(&path).expect_err("version error");
+        assert!(matches!(
+            err,
+            BuildIoError::Config(message)
+                if message == "unsupported project config version 2; expected 1"
+        ));
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_unknown_target_source() {
+        let path = temp_path("unknown_source");
+        fs::write(
+            &path,
+            r#"
+version = 1
+default_locale = "en"
+locales = ["en"]
+
+[[sources]]
+name = "site"
+layout = "locale-namespace"
+root = "locales"
+
+[[targets]]
+name = "web"
+source = "missing"
+preset = "vite"
+out_dir = "src/generated/mf2"
+"#,
+        )
+        .expect("write");
+
+        let err = load_project_config_or_default(&path).expect_err("source error");
+        assert!(matches!(
+            err,
+            BuildIoError::Config(message)
+                if message == "target web references unknown source missing"
+        ));
+
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -314,6 +736,7 @@ project_salt_path = "id_salt.txt"
         fs::write(
             &path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
@@ -352,6 +775,7 @@ stale_policy = "fail"
         fs::write(
             &path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
@@ -369,11 +793,9 @@ out_dir = "b"
         )
         .expect("write");
 
-        let config = load_project_config_or_default(&path).expect("config");
-        let err = config.validate_web_targets().expect_err("duplicate");
-        assert_eq!(
-            err,
-            WebTargetConfigError::DuplicateTargetName("docs".to_string())
+        let err = load_project_config_or_default(&path).expect_err("duplicate");
+        assert!(
+            matches!(err, BuildIoError::Config(message) if message == "duplicate web target name docs")
         );
 
         fs::remove_file(&path).ok();
@@ -385,6 +807,7 @@ out_dir = "b"
         fs::write(
             &path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
@@ -398,14 +821,12 @@ docusaurus_i18n_dir = "i18n"
         )
         .expect("write");
 
-        let config = load_project_config_or_default(&path).expect("config");
-        let err = config.validate_web_targets().expect_err("docs path");
-        assert_eq!(
+        let err = load_project_config_or_default(&path).expect_err("docs path");
+        assert!(matches!(
             err,
-            WebTargetConfigError::MissingDocusaurusDocsSourceDir {
-                target: "docs".to_string()
-            }
-        );
+            BuildIoError::Config(message)
+                if message == "web target docs docusaurus mode requires docs_source_dir"
+        ));
 
         fs::remove_file(&path).ok();
     }
@@ -416,6 +837,7 @@ docusaurus_i18n_dir = "i18n"
         fs::write(
             &path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
@@ -443,6 +865,7 @@ out_dir = "src/generated/mf2"
         fs::write(
             &path,
             r#"
+version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
@@ -456,16 +879,12 @@ out_dir = "src/generated/mf2"
         )
         .expect("write");
 
-        let config = load_project_config_or_default(&path).expect("config");
-        let err = config
-            .validate_web_targets()
-            .expect_err("hybrid docusaurus");
-        assert_eq!(
+        let err = load_project_config_or_default(&path).expect_err("hybrid docusaurus");
+        assert!(matches!(
             err,
-            WebTargetConfigError::HybridDocusaurusFramework {
-                target: "docs".to_string()
-            }
-        );
+            BuildIoError::Config(message)
+                if message == "web target docs hybrid mode does not support docusaurus framework"
+        ));
 
         fs::remove_file(&path).ok();
     }

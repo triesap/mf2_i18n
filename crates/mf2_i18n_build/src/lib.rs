@@ -33,8 +33,9 @@ pub mod web_runtime;
 
 pub use crate::compiler::CompileError;
 pub use crate::config::{
-    ProjectConfig, WebConfig, WebFramework, WebStalePolicy, WebTargetConfig, WebTargetConfigError,
-    WebTargetMode, load_project_config, load_project_config_or_default,
+    PROJECT_CONFIG_VERSION, ProjectConfig, ProjectConfigError, ProjectTargetConfig, SourceConfig,
+    SourceLayout, WebConfig, WebFramework, WebPreset, WebStalePolicy, WebTargetConfig,
+    WebTargetConfigError, WebTargetMode, load_project_config, load_project_config_or_default,
 };
 pub use crate::error::BuildIoError;
 pub use crate::platform::{

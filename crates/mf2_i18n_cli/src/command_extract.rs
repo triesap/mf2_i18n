@@ -77,7 +77,8 @@ mod tests {
 
         let config_path = dir.join("mf2_i18n.toml");
         let config_contents = format!(
-            "default_locale = \"en\"\nsource_dirs = [\"locales\"]\nmicro_locales_registry = \"micro-locales.toml\"\nproject_salt_path = \"{}\"\n",
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nmicro_locales_registry = \"micro-locales.toml\"\nproject_salt_path = \"{}\"\n",
             salt_path.display()
         );
         fs::write(&config_path, config_contents).expect("config");

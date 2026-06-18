@@ -116,7 +116,8 @@ mod tests {
         fs::write(root.join("id_salt.txt"), "salt").expect("salt");
         fs::write(
             &config_path,
-            "default_locale = \"en\"\nsource_dirs = [\"locales\", \"shared/locales\"]\nmicro_locales_registry = \"micro-locales.toml\"\nproject_salt_path = \"id_salt.txt\"\n",
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\", \"shared/locales\"]\nmicro_locales_registry = \"micro-locales.toml\"\nproject_salt_path = \"id_salt.txt\"\n",
         )
         .expect("config");
 
