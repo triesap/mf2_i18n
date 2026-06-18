@@ -53,9 +53,9 @@ impl ProjectLayout {
 
     pub fn source_roots(&self) -> Vec<PathBuf> {
         self.config
-            .source_dirs
+            .sources
             .iter()
-            .map(|value| self.resolve_path(value))
+            .map(|source| self.resolve_path(&source.root))
             .collect()
     }
 

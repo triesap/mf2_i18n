@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::config::{SourceConfig, SourceLayout};
 use crate::mf2_source::parse_mf2_source;
 use crate::project::ProjectLayout;
 
@@ -70,6 +71,12 @@ pub enum ProjectCatalogError {
     MissingDefaultLocale(String),
     #[error("namespace file must have a non-empty stem: {path:?}")]
     EmptyNamespace { path: PathBuf },
+    #[error("locale file must have a non-empty stem: {path:?}")]
+    EmptyLocale { path: PathBuf },
+    #[error("message key {key} in {path:?} must include a namespace")]
+    UnqualifiedMessageKey { path: PathBuf, key: String },
+    #[error("json locale file root must be an object: {path:?}")]
+    JsonLocaleRootMustBeObject { path: PathBuf },
     #[error("json message path must not be empty in {path:?}")]
     EmptyJsonMessagePath { path: PathBuf },
     #[error("json message key segment must not be empty in {path:?}")]
@@ -115,29 +122,22 @@ pub fn load_project_catalogs_with_options(
     project: &ProjectLayout,
     options: &ProjectCatalogLoadOptions,
 ) -> Result<ProjectCatalogLoad, ProjectCatalogError> {
-    let source_roots = project.source_roots();
-    if source_roots.is_empty() {
+    if project.config().sources.is_empty() {
         return Err(ProjectCatalogError::NoSourceDirs);
     }
 
     let mut catalogs = BTreeMap::<String, ProjectCatalog>::new();
     let mut rerun_if_changed_paths = BTreeSet::new();
 
-    for source_root in source_roots {
+    for source in &project.config().sources {
+        let source_root = project.resolve_path(&source.root);
         rerun_if_changed_paths.insert(source_root.clone());
-        let entries = fs::read_dir(&source_root)?;
-
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-
-            let locale = entry.file_name().to_string_lossy().into_owned();
-            rerun_if_changed_paths.insert(path.clone());
-            load_locale_catalog(&path, &locale, &mut catalogs, &mut rerun_if_changed_paths)?;
-        }
+        load_source_catalog(
+            source,
+            &source_root,
+            &mut catalogs,
+            &mut rerun_if_changed_paths,
+        )?;
     }
 
     if catalogs.is_empty() {
@@ -157,7 +157,49 @@ pub fn load_project_catalogs_with_options(
     })
 }
 
-fn load_locale_catalog(
+fn load_source_catalog(
+    source: &SourceConfig,
+    source_root: &Path,
+    catalogs: &mut BTreeMap<String, ProjectCatalog>,
+    rerun_if_changed_paths: &mut BTreeSet<PathBuf>,
+) -> Result<(), ProjectCatalogError> {
+    match source.layout {
+        SourceLayout::LocaleNamespace => {
+            load_locale_namespace_root(source_root, catalogs, rerun_if_changed_paths)
+        }
+        SourceLayout::NamespaceLocale => {
+            load_namespace_locale_root(source_root, catalogs, rerun_if_changed_paths)
+        }
+        SourceLayout::SingleLocaleFile => {
+            load_single_locale_file_root(source_root, catalogs, rerun_if_changed_paths)
+        }
+        SourceLayout::DocusaurusDocs => {
+            load_locale_namespace_root(source_root, catalogs, rerun_if_changed_paths)
+        }
+    }
+}
+
+fn load_locale_namespace_root(
+    source_root: &Path,
+    catalogs: &mut BTreeMap<String, ProjectCatalog>,
+    rerun_if_changed_paths: &mut BTreeSet<PathBuf>,
+) -> Result<(), ProjectCatalogError> {
+    let entries = fs::read_dir(source_root)?;
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let locale = entry.file_name().to_string_lossy().into_owned();
+        rerun_if_changed_paths.insert(path.clone());
+        load_locale_namespace_catalog(&path, &locale, catalogs, rerun_if_changed_paths)?;
+    }
+    Ok(())
+}
+
+fn load_locale_namespace_catalog(
     locale_dir: &Path,
     locale: &str,
     catalogs: &mut BTreeMap<String, ProjectCatalog>,
@@ -174,11 +216,11 @@ fn load_locale_catalog(
         match path.extension().and_then(|value| value.to_str()) {
             Some("json") => {
                 rerun_if_changed_paths.insert(path.clone());
-                load_json_namespace(&path, locale, catalogs)?;
+                load_json_namespace_from_file(&path, locale, catalogs)?;
             }
             Some("mf2") => {
                 rerun_if_changed_paths.insert(path.clone());
-                load_mf2_namespace(&path, locale, catalogs)?;
+                load_mf2_namespace_from_file(&path, locale, catalogs)?;
             }
             _ => {}
         }
@@ -186,19 +228,132 @@ fn load_locale_catalog(
     Ok(())
 }
 
-fn load_json_namespace(
+fn load_namespace_locale_root(
+    source_root: &Path,
+    catalogs: &mut BTreeMap<String, ProjectCatalog>,
+    rerun_if_changed_paths: &mut BTreeSet<PathBuf>,
+) -> Result<(), ProjectCatalogError> {
+    let entries = fs::read_dir(source_root)?;
+    for entry in entries {
+        let entry = entry?;
+        let namespace_dir = entry.path();
+        if !namespace_dir.is_dir() {
+            continue;
+        }
+
+        let namespace = entry.file_name().to_string_lossy().into_owned();
+        if namespace.trim().is_empty() {
+            return Err(ProjectCatalogError::EmptyNamespace {
+                path: namespace_dir,
+            });
+        }
+        rerun_if_changed_paths.insert(namespace_dir.clone());
+        for locale_entry in fs::read_dir(namespace_dir)? {
+            let locale_entry = locale_entry?;
+            let path = locale_entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let Some(locale) = locale_from_path(&path)? else {
+                continue;
+            };
+            match path.extension().and_then(|value| value.to_str()) {
+                Some("json") => {
+                    rerun_if_changed_paths.insert(path.clone());
+                    load_json_namespace_named(&path, &locale, &namespace, catalogs)?;
+                }
+                Some("mf2") => {
+                    rerun_if_changed_paths.insert(path.clone());
+                    load_mf2_namespace_named(&path, &locale, &namespace, catalogs)?;
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn load_single_locale_file_root(
+    source_root: &Path,
+    catalogs: &mut BTreeMap<String, ProjectCatalog>,
+    rerun_if_changed_paths: &mut BTreeSet<PathBuf>,
+) -> Result<(), ProjectCatalogError> {
+    let entries = fs::read_dir(source_root)?;
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(locale) = locale_from_path(&path)? else {
+            continue;
+        };
+        match path.extension().and_then(|value| value.to_str()) {
+            Some("json") => {
+                rerun_if_changed_paths.insert(path.clone());
+                load_json_locale_file(&path, &locale, catalogs)?;
+            }
+            Some("mf2") => {
+                rerun_if_changed_paths.insert(path.clone());
+                load_mf2_locale_file(&path, &locale, catalogs)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn load_json_namespace_from_file(
     path: &Path,
     locale: &str,
     catalogs: &mut BTreeMap<String, ProjectCatalog>,
 ) -> Result<(), ProjectCatalogError> {
     let namespace = namespace_from_path(path)?;
+    load_json_namespace_named(path, locale, &namespace, catalogs)
+}
+
+fn load_json_namespace_named(
+    path: &Path,
+    locale: &str,
+    namespace: &str,
+    catalogs: &mut BTreeMap<String, ProjectCatalog>,
+) -> Result<(), ProjectCatalogError> {
     let raw = fs::read_to_string(path)?;
     let value: Value = serde_json::from_str(&raw).map_err(|source| ProjectCatalogError::Json {
         path: path.to_path_buf(),
         source,
     })?;
     let mut parts = Vec::new();
-    flatten_json_namespace(path, locale, &namespace, &value, &mut parts, catalogs)
+    flatten_json_namespace(path, locale, namespace, &value, &mut parts, catalogs)
+}
+
+fn load_json_locale_file(
+    path: &Path,
+    locale: &str,
+    catalogs: &mut BTreeMap<String, ProjectCatalog>,
+) -> Result<(), ProjectCatalogError> {
+    let raw = fs::read_to_string(path)?;
+    let value: Value = serde_json::from_str(&raw).map_err(|source| ProjectCatalogError::Json {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let Value::Object(namespaces) = value else {
+        return Err(ProjectCatalogError::JsonLocaleRootMustBeObject {
+            path: path.to_path_buf(),
+        });
+    };
+    for (namespace, value) in namespaces {
+        if namespace.trim().is_empty() {
+            return Err(ProjectCatalogError::EmptyNamespace {
+                path: path.to_path_buf(),
+            });
+        }
+        let mut parts = Vec::new();
+        flatten_json_namespace(path, locale, &namespace, &value, &mut parts, catalogs)?;
+    }
+    Ok(())
 }
 
 fn flatten_json_namespace(
@@ -255,12 +410,21 @@ fn flatten_json_namespace(
     }
 }
 
-fn load_mf2_namespace(
+fn load_mf2_namespace_from_file(
     path: &Path,
     locale: &str,
     catalogs: &mut BTreeMap<String, ProjectCatalog>,
 ) -> Result<(), ProjectCatalogError> {
     let namespace = namespace_from_path(path)?;
+    load_mf2_namespace_named(path, locale, &namespace, catalogs)
+}
+
+fn load_mf2_namespace_named(
+    path: &Path,
+    locale: &str,
+    namespace: &str,
+    catalogs: &mut BTreeMap<String, ProjectCatalog>,
+) -> Result<(), ProjectCatalogError> {
     let raw = fs::read_to_string(path)?;
     let entries = parse_mf2_source(&raw).map_err(|error| ProjectCatalogError::SourceParse {
         path: path.to_path_buf(),
@@ -274,9 +438,9 @@ fn load_mf2_namespace(
             catalogs,
             locale,
             ProjectCatalogMessage {
-                namespace: namespace.clone(),
+                namespace: namespace.to_string(),
                 message_path: entry.key.clone(),
-                qualified_key: qualified_key(&namespace, &entry.key),
+                qualified_key: qualified_key(namespace, &entry.key),
                 value: entry.value,
                 source_path: path.to_path_buf(),
                 line: Some(entry.line),
@@ -285,6 +449,58 @@ fn load_mf2_namespace(
     }
 
     Ok(())
+}
+
+fn load_mf2_locale_file(
+    path: &Path,
+    locale: &str,
+    catalogs: &mut BTreeMap<String, ProjectCatalog>,
+) -> Result<(), ProjectCatalogError> {
+    let raw = fs::read_to_string(path)?;
+    let entries = parse_mf2_source(&raw).map_err(|error| ProjectCatalogError::SourceParse {
+        path: path.to_path_buf(),
+        line: error.line,
+        column: error.column,
+        message: error.message,
+    })?;
+
+    for entry in entries {
+        let (namespace, message_path) = split_qualified_key(path, &entry.key)?;
+        insert_message(
+            catalogs,
+            locale,
+            ProjectCatalogMessage {
+                namespace: namespace.clone(),
+                message_path: message_path.clone(),
+                qualified_key: qualified_key(&namespace, &message_path),
+                value: entry.value,
+                source_path: path.to_path_buf(),
+                line: Some(entry.line),
+            },
+        )?;
+    }
+
+    Ok(())
+}
+
+fn locale_from_path(path: &Path) -> Result<Option<String>, ProjectCatalogError> {
+    if !matches!(
+        path.extension().and_then(|value| value.to_str()),
+        Some("json" | "mf2")
+    ) {
+        return Ok(None);
+    }
+    let locale = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .trim();
+    if locale.is_empty() {
+        return Err(ProjectCatalogError::EmptyLocale {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(Some(locale.to_owned()))
 }
 
 fn namespace_from_path(path: &Path) -> Result<String, ProjectCatalogError> {
@@ -299,6 +515,22 @@ fn namespace_from_path(path: &Path) -> Result<String, ProjectCatalogError> {
         });
     }
     Ok(namespace.to_owned())
+}
+
+fn split_qualified_key(path: &Path, key: &str) -> Result<(String, String), ProjectCatalogError> {
+    let Some((namespace, message_path)) = key.split_once('.') else {
+        return Err(ProjectCatalogError::UnqualifiedMessageKey {
+            path: path.to_path_buf(),
+            key: key.to_string(),
+        });
+    };
+    if namespace.trim().is_empty() || message_path.trim().is_empty() {
+        return Err(ProjectCatalogError::UnqualifiedMessageKey {
+            path: path.to_path_buf(),
+            key: key.to_string(),
+        });
+    }
+    Ok((namespace.to_string(), message_path.to_string()))
 }
 
 fn insert_message(
@@ -392,7 +624,16 @@ mod tests {
             &config_path,
             format!(
                 "version = 1
-default_locale = {default_locale:?}\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n"
+default_locale = {default_locale:?}
+locales = [{default_locale:?}]
+project_salt_path = \"id_salt.txt\"
+
+[[sources]]
+name = \"default\"
+layout = \"locale-namespace\"
+root = \"locales\"
+namespace_glob = \"*.mf2\"
+"
             ),
         )
         .expect("config");
@@ -439,6 +680,121 @@ default_locale = {default_locale:?}\nsource_dirs = [\"locales\"]\nproject_salt_p
             loaded
                 .rerun_if_changed_paths()
                 .contains(&en_dir.join("common.json"))
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn loads_namespace_locale_layout() {
+        let root = temp_dir("namespace_locale");
+        let common_dir = root.join("translations").join("common");
+        fs::create_dir_all(&common_dir).expect("common");
+        fs::write(common_dir.join("en.mf2"), "home.title = Hi").expect("en");
+        fs::write(common_dir.join("es.mf2"), "home.title = Hola").expect("es");
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 1
+default_locale = "en"
+locales = ["en", "es"]
+project_salt_path = "id_salt.txt"
+
+[[sources]]
+name = "site"
+layout = "namespace-locale"
+root = "translations"
+"#,
+        )
+        .expect("config");
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let project = ProjectLayout::load(&config_path).expect("project");
+        let loaded = load_project_catalogs(&project).expect("load");
+        assert_eq!(
+            loaded.catalog("en").expect("en")["common.home.title"].value,
+            "Hi"
+        );
+        assert_eq!(
+            loaded.catalog("es").expect("es")["common.home.title"].value,
+            "Hola"
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn loads_single_locale_file_layout() {
+        let root = temp_dir("single_locale");
+        let translations_dir = root.join("translations");
+        fs::create_dir_all(&translations_dir).expect("translations");
+        fs::write(translations_dir.join("en.mf2"), "common.home.title = Hi").expect("en");
+        fs::write(translations_dir.join("es.mf2"), "common.home.title = Hola").expect("es");
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 1
+default_locale = "en"
+locales = ["en", "es"]
+project_salt_path = "id_salt.txt"
+
+[[sources]]
+name = "site"
+layout = "single-locale-file"
+root = "translations"
+"#,
+        )
+        .expect("config");
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let project = ProjectLayout::load(&config_path).expect("project");
+        let loaded = load_project_catalogs(&project).expect("load");
+        let message = &loaded.catalog("en").expect("en")["common.home.title"];
+        assert_eq!(message.namespace, "common");
+        assert_eq!(message.message_path, "home.title");
+        assert_eq!(message.value, "Hi");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn loads_docusaurus_docs_layout() {
+        let root = temp_dir("docusaurus_docs");
+        let en_dir = root.join("locales").join("en");
+        let es_dir = root.join("locales").join("es");
+        fs::create_dir_all(&en_dir).expect("en");
+        fs::create_dir_all(&es_dir).expect("es");
+        fs::write(en_dir.join("docs.mf2"), "intro.title = Introduction").expect("en");
+        fs::write(es_dir.join("docs.mf2"), "intro.title = Introduccion").expect("es");
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 1
+default_locale = "en"
+locales = ["en", "es"]
+project_salt_path = "id_salt.txt"
+
+[[sources]]
+name = "docs"
+layout = "docusaurus-docs"
+root = "locales"
+"#,
+        )
+        .expect("config");
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let project = ProjectLayout::load(&config_path).expect("project");
+        let loaded = load_project_catalogs(&project).expect("load");
+        assert_eq!(
+            loaded.catalog("en").expect("en")["docs.intro.title"].value,
+            "Introduction"
+        );
+        assert_eq!(
+            loaded.catalog("es").expect("es")["docs.intro.title"].value,
+            "Introduccion"
         );
 
         fs::remove_dir_all(&root).ok();
