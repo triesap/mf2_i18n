@@ -11,8 +11,17 @@ mod command_sign;
 mod command_validate;
 
 fn main() {
-    if let Err(err) = cli::run() {
-        eprintln!("{err}");
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let json = cli::args_request_json(&args);
+    if let Err(err) = cli::run_args(args) {
+        if json {
+            match cli::render_error_json(&err) {
+                Ok(payload) => eprintln!("{payload}"),
+                Err(json_err) => eprintln!("{json_err}"),
+            }
+        } else {
+            eprintln!("{err}");
+        }
         std::process::exit(1);
     }
 }

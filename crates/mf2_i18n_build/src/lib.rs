@@ -37,6 +37,7 @@ pub use crate::config::{
     SourceLayout, WebConfig, WebFramework, WebPreset, WebStalePolicy, WebTargetConfig,
     WebTargetConfigError, WebTargetMode, load_project_config, load_project_config_or_default,
 };
+pub use crate::diagnostic::{Diagnostic, DiagnosticReport, DiagnosticSeverity};
 pub use crate::error::BuildIoError;
 pub use crate::platform::{
     PlatformBundle, PlatformBundleError, PlatformBundleManifest, PlatformPack,

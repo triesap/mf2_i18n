@@ -12,7 +12,7 @@ use crate::command_extract::{ExtractCommandError, ExtractOptions, run_extract};
 use crate::command_pseudo::{PseudoCommandError, PseudoOptions, run_pseudo};
 use crate::command_sign::{SignCommandError, SignOptions, run_sign};
 use crate::command_validate::{ValidateCommandError, ValidateOptions, run_validate};
-use mf2_i18n_build::WebJsonMode;
+use mf2_i18n_build::{Diagnostic, DiagnosticReport, WebJsonMode};
 
 #[derive(Debug, Error)]
 pub enum CliAppError {
@@ -36,8 +36,9 @@ pub enum CliAppError {
     ExportWebJson(#[from] ExportWebJsonCommandError),
 }
 
-pub fn run() -> Result<(), CliAppError> {
-    let mut args = std::env::args().skip(1);
+pub fn run_args(raw_args: Vec<String>) -> Result<(), CliAppError> {
+    let (args, _) = strip_json_flag(raw_args);
+    let mut args = args.into_iter();
     let command = args.next().ok_or_else(|| CliAppError::Usage(usage()))?;
     match command.as_str() {
         "extract" => {
@@ -86,6 +87,53 @@ pub fn run() -> Result<(), CliAppError> {
     }
 }
 
+pub fn args_request_json(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--json")
+}
+
+pub fn error_diagnostic_report(error: &CliAppError) -> DiagnosticReport {
+    DiagnosticReport::new(vec![error_diagnostic(error)])
+}
+
+pub fn render_error_json(error: &CliAppError) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(&error_diagnostic_report(error))
+}
+
+fn error_diagnostic(error: &CliAppError) -> Diagnostic {
+    match error {
+        CliAppError::Usage(message) => Diagnostic::new("MF2CLI_USAGE", message.clone())
+            .with_suggestion("Run mf2_i18n_cli --help."),
+        CliAppError::Extract(_) => command_error("MF2CLI_EXTRACT", error),
+        CliAppError::Validate(_) => command_error("MF2CLI_VALIDATE", error),
+        CliAppError::Build(_) => command_error("MF2CLI_BUILD", error),
+        CliAppError::BuildWeb(_) => command_error("MF2CLI_BUILD_WEB", error),
+        CliAppError::Sign(_) => command_error("MF2CLI_SIGN", error),
+        CliAppError::Pseudo(_) => command_error("MF2CLI_PSEUDO", error),
+        CliAppError::Coverage(_) => command_error("MF2CLI_COVERAGE", error),
+        CliAppError::ExportWebJson(_) => command_error("MF2CLI_EXPORT_WEB_JSON", error),
+    }
+}
+
+fn command_error(code: &str, error: &CliAppError) -> Diagnostic {
+    Diagnostic::new(code, error.to_string()).with_suggestion("Run the command again with --help.")
+}
+
+fn strip_json_flag(args: Vec<String>) -> (Vec<String>, bool) {
+    let mut json = false;
+    let filtered = args
+        .into_iter()
+        .filter(|arg| {
+            if arg == "--json" {
+                json = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    (filtered, json)
+}
+
 fn parse_extract_options(args: Vec<String>) -> Result<ExtractOptions, CliAppError> {
     let mut project = None;
     let mut roots = Vec::new();
@@ -126,7 +174,7 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>]\n       mf2_i18n_cli build --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>]".to_string()
+    "usage: mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli build --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]".to_string()
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
@@ -316,9 +364,9 @@ fn parse_export_web_json_options(args: Vec<String>) -> Result<ExportWebJsonOptio
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_build_options, parse_build_web_options, parse_coverage_options,
+        CliAppError, parse_build_options, parse_build_web_options, parse_coverage_options,
         parse_export_web_json_options, parse_extract_options, parse_pseudo_options,
-        parse_sign_options, parse_validate_options,
+        parse_sign_options, parse_validate_options, render_error_json, strip_json_flag,
     };
     use mf2_i18n_build::WebJsonMode;
 
@@ -428,5 +476,40 @@ mod tests {
         let options = parse_export_web_json_options(args).expect("options");
         assert_eq!(options.mode, WebJsonMode::Plain);
         assert!(options.out_dir.ends_with("web-json"));
+    }
+
+    #[test]
+    fn strips_global_json_flag_before_command_parsing() {
+        let (args, json) = strip_json_flag(vec![
+            "build-web".to_string(),
+            "--target".to_string(),
+            "docs".to_string(),
+            "--json".to_string(),
+        ]);
+
+        assert!(json);
+        assert_eq!(
+            args,
+            [
+                "build-web".to_string(),
+                "--target".to_string(),
+                "docs".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn renders_usage_errors_as_diagnostic_json() {
+        let payload = render_error_json(&CliAppError::Usage("bad command".to_string()))
+            .expect("json payload");
+        let value: serde_json::Value = serde_json::from_str(&payload).expect("json");
+
+        assert_eq!(value["diagnostics"][0]["code"], "MF2CLI_USAGE");
+        assert_eq!(value["diagnostics"][0]["severity"], "error");
+        assert_eq!(value["diagnostics"][0]["message"], "bad command");
+        assert_eq!(
+            value["diagnostics"][0]["suggestions"][0],
+            "Run mf2_i18n_cli --help."
+        );
     }
 }
