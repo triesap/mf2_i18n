@@ -21,6 +21,12 @@ embedded = ["dep:mf2_i18n_embedded"]
 native = ["dep:mf2_i18n_native", "runtime", "embedded"]
 build = ["dep:mf2_i18n_build"]
 std_backend = ["dep:mf2_i18n_std"]
+dto-bindgen = [
+    "build",
+    "runtime",
+    "mf2_i18n_build/dto-bindgen",
+    "mf2_i18n_runtime/dto-bindgen",
+]
 
 [dependencies]
 mf2_i18n_build = { workspace = true, optional = true }

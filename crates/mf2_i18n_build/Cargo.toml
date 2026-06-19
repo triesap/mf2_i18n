@@ -11,8 +11,13 @@ description = "Reusable build and project APIs for compiling and validating Unic
 keywords = ["i18n", "messageformat", "localization", "unicode", "mf2"]
 categories = ["internationalization", "text-processing"]
 
+[features]
+default = []
+dto-bindgen = ["dep:dto_bindgen"]
+
 [dependencies]
 blake3 = { workspace = true }
+dto_bindgen = { workspace = true, optional = true }
 hex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

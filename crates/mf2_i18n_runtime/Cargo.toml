@@ -14,7 +14,12 @@ categories = ["internationalization", "text-processing"]
 [lib]
 name = "mf2_i18n_runtime"
 
+[features]
+default = []
+dto-bindgen = ["dep:dto_bindgen"]
+
 [dependencies]
+dto_bindgen = { workspace = true, optional = true }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 serde = { workspace = true }
