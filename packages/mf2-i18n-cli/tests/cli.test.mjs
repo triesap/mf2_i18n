@@ -13,6 +13,7 @@ test('package exposes the mf2-i18n bin', async () => {
   assert.equal(manifest.name, '@mf2-i18n/cli');
   assert.equal(manifest.bin['mf2-i18n'], './bin/mf2-i18n.mjs');
   assert.equal(manifest.type, 'module');
+  assert.deepEqual(manifest.files, ['bin', 'src']);
 });
 
 test('prints help and version', async () => {
@@ -201,6 +202,12 @@ test('reports unknown commands and missing targets', async () => {
   const missingTarget = await capture(['build-web']);
   assert.equal(missingTarget.exitCode, 1);
   assert.match(missingTarget.stderr, /build-web requires --target <name>/);
+});
+
+test('published launcher rejects dto type artifact flags', async () => {
+  const result = await capture(['build-web', '--target', 'docs', '--dto-types']);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /unknown option --dto-types/);
 });
 
 test('doctor invokes an explicit Rust CLI binary', async () => {
