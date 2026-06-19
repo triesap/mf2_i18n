@@ -14,7 +14,8 @@ use crate::project_pipeline::{
 };
 use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
-    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts, write_web_artifacts,
+    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts,
+    render_web_typescript_index, write_web_artifacts,
 };
 use crate::web_metadata::{
     WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
@@ -236,6 +237,7 @@ pub fn build_runtime_web_target(
         runtime_output.supported_locales(),
         &namespaces,
         &message_metadata,
+        options.dto_types(),
     )?;
     if options.dto_types() {
         append_web_dto_artifacts(&mut code_files)?;
@@ -366,6 +368,7 @@ fn runtime_code_files(
     supported_locales: &[String],
     namespaces: &[String],
     message_metadata: &[WebMessageMetadata],
+    dto_types: bool,
 ) -> Result<Vec<WebArtifactFile>, RuntimeWebBuildError> {
     Ok(vec![
         WebArtifactFile::new(
@@ -384,7 +387,7 @@ fn runtime_code_files(
         )?,
         WebArtifactFile::new(
             "index.ts",
-            b"export * from \"./types\";\nexport * from \"./loaders\";\n".to_vec(),
+            render_web_typescript_index(&["types", "loaders"], dto_types).into_bytes(),
         )?,
     ])
 }

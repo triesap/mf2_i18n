@@ -176,6 +176,21 @@ pub fn append_web_dto_artifacts(
     }
 }
 
+pub(crate) fn render_web_typescript_index(modules: &[&str], dto_types: bool) -> String {
+    let mut output = String::new();
+    for module in modules {
+        output.push_str("export * from \"./");
+        output.push_str(module);
+        output.push_str("\";\n");
+    }
+    if dto_types {
+        output.push_str(
+            "export type {\n  ArgSpec as Mf2ArgSpec,\n  ArgType as Mf2ArgType,\n  Catalog as Mf2Catalog,\n  CatalogFeatures as Mf2CatalogFeatures,\n  CatalogMessage as Mf2CatalogMessage,\n  HybridMessageDelivery as Mf2HybridMessageDelivery,\n  HybridMessagePlan as Mf2HybridMessagePlan,\n  HybridMessageRoute as Mf2HybridMessageRoute,\n  HybridWebAssets as Mf2HybridAssets,\n  Manifest as Mf2WebManifest,\n  ManifestSigning as Mf2ManifestSigning,\n  MessageSpec as Mf2MessageSpec,\n  PackEntry as Mf2WebPackEntry,\n  RuntimeWebAssets as Mf2RuntimeAssets,\n  RuntimeWebPackAsset as Mf2RuntimePackAsset,\n  SourceRef as Mf2SourceRef,\n  WebMessageArg as Mf2WebMessageArg,\n  WebMessageMetadata as Mf2WebMessageMetadata,\n} from \"./dto/ts\";\n",
+        );
+    }
+    output
+}
+
 pub fn write_web_artifacts(
     options: &WebArtifactWriteOptions,
     input: &WebArtifactManifestInput,

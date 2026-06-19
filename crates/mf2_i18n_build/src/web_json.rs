@@ -12,7 +12,8 @@ use crate::project::{ProjectError, ProjectLayout, resolve_config_relative_path};
 use crate::project_catalogs::{ProjectCatalog, ProjectCatalogError, ProjectCatalogMessage};
 use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
-    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts, write_web_artifacts,
+    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts,
+    render_web_typescript_index, write_web_artifacts,
 };
 use crate::web_metadata::{
     WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
@@ -448,7 +449,7 @@ pub fn build_plain_json_web_target(
     )?);
     artifact_files.push(WebArtifactFile::new(
         "index.ts",
-        b"export * from \"./types\";\nexport * from \"./loaders\";\n".to_vec(),
+        render_web_typescript_index(&["types", "loaders"], options.dto_types()).into_bytes(),
     )?);
     if options.dto_types() {
         append_web_dto_artifacts(&mut artifact_files)?;

@@ -13,7 +13,8 @@ use crate::project_catalogs::{
 };
 use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
-    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts, write_web_artifacts,
+    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts,
+    render_web_typescript_index, write_web_artifacts,
 };
 use crate::web_metadata::{
     WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
@@ -299,6 +300,10 @@ pub fn build_docusaurus_web_target(
         .into_bytes(),
     )?];
     if options.dto_types() {
+        artifact_files.push(WebArtifactFile::new(
+            "index.ts",
+            render_web_typescript_index(&["messages"], true).into_bytes(),
+        )?);
         append_web_dto_artifacts(&mut artifact_files)?;
     }
 
