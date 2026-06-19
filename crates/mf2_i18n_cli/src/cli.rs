@@ -218,7 +218,14 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2_i18n_cli init [--preset <name>] [--source-layout <name>] [--target <name>] [--config <path>] [--json]\n       mf2_i18n_cli detect [--cwd <path>] [--json]\n       mf2_i18n_cli build --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli check --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli scaffold missing --source <name> --locale <locale> [--config <path>] [--json]\n       mf2_i18n_cli doctor [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check] [--dto-types] [--json]\n       mf2_i18n_cli build-native --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]".to_string()
+    let dto_flag = if cfg!(feature = "dto-bindgen") {
+        " [--dto-types]"
+    } else {
+        ""
+    };
+    format!(
+        "usage: mf2_i18n_cli init [--preset <name>] [--source-layout <name>] [--target <name>] [--config <path>] [--json]\n       mf2_i18n_cli detect [--cwd <path>] [--json]\n       mf2_i18n_cli build --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli check --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli scaffold missing --source <name> --locale <locale> [--config <path>] [--json]\n       mf2_i18n_cli doctor [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check]{dto_flag} [--json]\n       mf2_i18n_cli build-native --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]"
+    )
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
@@ -285,7 +292,13 @@ fn parse_build_web_options(args: Vec<String>) -> Result<BuildWebOptions, CliAppE
             "--out" => out_dir = Some(PathBuf::from(next_value("--out", &mut iter)?)),
             "--config" => config_path = PathBuf::from(next_value("--config", &mut iter)?),
             "--check" => check = true,
-            "--dto-types" => dto_types = true,
+            "--dto-types" if cfg!(feature = "dto-bindgen") => dto_types = true,
+            "--dto-types" => {
+                return Err(CliAppError::Usage(format!(
+                    "--dto-types requires building mf2_i18n_cli with the dto-bindgen feature\n\n{}",
+                    usage()
+                )));
+            }
             "--help" | "-h" => return Err(CliAppError::Usage(usage())),
             _ => return Err(CliAppError::Usage(usage())),
         }
@@ -545,13 +558,41 @@ mod tests {
             "--config".to_string(),
             "mf2_i18n.toml".to_string(),
             "--check".to_string(),
-            "--dto-types".to_string(),
         ];
         let options = parse_build_web_options(args).expect("options");
         assert_eq!(options.target_name, "docs");
         assert!(options.out_dir.expect("out").ends_with("web-generated"));
         assert!(options.check);
+        assert!(!options.dto_types);
+    }
+
+    #[cfg(feature = "dto-bindgen")]
+    #[test]
+    fn parses_build_web_dto_types_when_feature_enabled() {
+        let args = vec![
+            "--target".to_string(),
+            "docs".to_string(),
+            "--dto-types".to_string(),
+        ];
+        let options = parse_build_web_options(args).expect("options");
+        assert_eq!(options.target_name, "docs");
         assert!(options.dto_types);
+    }
+
+    #[cfg(not(feature = "dto-bindgen"))]
+    #[test]
+    fn rejects_build_web_dto_types_without_feature() {
+        let err = parse_build_web_options(vec![
+            "--target".to_string(),
+            "docs".to_string(),
+            "--dto-types".to_string(),
+        ])
+        .expect_err("feature error");
+
+        let CliAppError::Usage(message) = err else {
+            panic!("expected usage error");
+        };
+        assert!(message.contains("requires building mf2_i18n_cli with the dto-bindgen feature"));
     }
 
     #[test]
