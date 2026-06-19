@@ -374,6 +374,71 @@ generated_at = "2026-02-01T00:00:00Z"
         fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(feature = "dto-bindgen")]
+    #[test]
+    fn builds_runtime_web_target_with_typed_dto_parts() {
+        let dir = temp_dir();
+        let locales_dir = dir.join("locales").join("en");
+        fs::create_dir_all(&locales_dir).expect("locale");
+        fs::write(
+            locales_dir.join("common.json"),
+            r#"{"home":{"title":"Hi"}}"#,
+        )
+        .expect("write");
+        fs::write(dir.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = dir.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "runtime"
+mode = "runtime"
+out_dir = "web-runtime"
+release_id = "test-runtime"
+generated_at = "2026-02-01T00:00:00Z"
+"#,
+        )
+        .expect("config");
+
+        run_build_web(&BuildWebOptions {
+            config_path,
+            target_name: "runtime".to_string(),
+            out_dir: None,
+            check: false,
+            dto_types: true,
+        })
+        .expect("build");
+
+        let out_dir = dir.join("web-runtime");
+        let types = fs::read_to_string(out_dir.join("types.ts")).expect("types");
+        assert!(types.contains("import type { Manifest as Mf2WebManifest }"));
+        assert!(types.contains("export type Mf2IdMap = Record<string, number>;"));
+        assert!(types.contains("readonly manifest: Mf2WebManifest"));
+        assert!(types.contains("readonly idMap: Mf2IdMap"));
+
+        let loaders = fs::read_to_string(out_dir.join("loaders.ts")).expect("loaders");
+        assert!(loaders.contains("import type { Manifest as Mf2WebManifest }"));
+        assert!(loaders.contains(
+            "export async function loadManifest(options: RuntimeLoaderOptions = {}): Promise<Mf2WebManifest>"
+        ));
+        assert!(loaders.contains(
+            "export async function loadIdMap(options: RuntimeLoaderOptions = {}): Promise<Mf2IdMap>"
+        ));
+        assert!(loaders.contains("const manifest = await loadManifest(options);"));
+        assert!(loaders.contains("const idMap = await loadIdMap(options);"));
+
+        let index = fs::read_to_string(out_dir.join("index.ts")).expect("index");
+        assert!(index.contains("Manifest as Mf2WebManifest"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn builds_hybrid_web_target() {
         let dir = temp_dir();
@@ -437,6 +502,78 @@ namespaces = ["common"]
             dto_types: false,
         })
         .expect("check");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "dto-bindgen")]
+    #[test]
+    fn builds_hybrid_web_target_with_typed_dto_parts() {
+        let dir = temp_dir();
+        for locale in ["en", "es"] {
+            fs::create_dir_all(dir.join("locales").join(locale)).expect("locale");
+        }
+        fs::write(
+            dir.join("locales/en/common.json"),
+            r#"{"home":{"title":"Hi"},"cart":{"count":"{ $count :number } items"}}"#,
+        )
+        .expect("write en");
+        fs::write(
+            dir.join("locales/es/common.json"),
+            r#"{"home":{"title":"Hola"},"cart":{"count":"{ $count :number } articulos"}}"#,
+        )
+        .expect("write es");
+        fs::write(dir.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = dir.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "hybrid"
+mode = "hybrid"
+framework = "vite"
+out_dir = "web-hybrid"
+locales = ["en", "es"]
+namespaces = ["common"]
+"#,
+        )
+        .expect("config");
+
+        run_build_web(&BuildWebOptions {
+            config_path,
+            target_name: "hybrid".to_string(),
+            out_dir: None,
+            check: false,
+            dto_types: true,
+        })
+        .expect("build");
+
+        let out_dir = dir.join("web-hybrid");
+        let types = fs::read_to_string(out_dir.join("types.ts")).expect("types");
+        assert!(types.contains("import type { Manifest as Mf2WebManifest }"));
+        assert!(types.contains("export type Mf2IdMap = Record<string, number>;"));
+        assert!(types.contains("readonly manifest: Mf2WebManifest"));
+        assert!(types.contains("readonly idMap: Mf2IdMap"));
+
+        let loaders = fs::read_to_string(out_dir.join("loaders.ts")).expect("loaders");
+        assert!(loaders.contains("import type { Manifest as Mf2WebManifest }"));
+        assert!(loaders.contains(
+            "export async function loadManifest(options: HybridLoaderOptions = {}): Promise<Mf2WebManifest>"
+        ));
+        assert!(loaders.contains(
+            "export async function loadIdMap(options: HybridLoaderOptions = {}): Promise<Mf2IdMap>"
+        ));
+        assert!(loaders.contains("const manifest = await loadManifest(options);"));
+        assert!(loaders.contains("const idMap = await loadIdMap(options);"));
+
+        let index = fs::read_to_string(out_dir.join("index.ts")).expect("index");
+        assert!(index.contains("Manifest as Mf2WebManifest"));
 
         fs::remove_dir_all(&dir).ok();
     }

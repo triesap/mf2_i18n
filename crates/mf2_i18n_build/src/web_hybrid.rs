@@ -289,6 +289,7 @@ pub fn build_hybrid_web_target(
             runtime_output.supported_locales(),
             &namespaces,
             &message_metadata,
+            options.dto_types(),
         )
         .into_bytes(),
     )?);
@@ -299,6 +300,7 @@ pub fn build_hybrid_web_target(
             &runtime_assets,
             runtime_output.supported_locales(),
             &static_namespaces,
+            options.dto_types(),
         )?
         .into_bytes(),
     )?);
@@ -459,16 +461,27 @@ fn render_hybrid_types(
     supported_locales: &[String],
     namespaces: &[String],
     message_metadata: &[WebMessageMetadata],
+    dto_types: bool,
 ) -> String {
-    format!(
-        "{}export type StaticMessages = Record<string, unknown>;\nexport type Mf2RuntimeArg = string | number | boolean | {{ readonly type: \"datetime\"; readonly unixMilliseconds: number }} | {{ readonly type: \"datetime\"; readonly unixSeconds: number }} | {{ readonly type: \"currency\"; readonly value: number; readonly code: string }};\nexport type Mf2RuntimeArgs = Record<string, Mf2RuntimeArg>;\nexport type RuntimeWebPackAsset = {{ readonly locale: Locale; readonly url: string; readonly kind: string; readonly hash: string; readonly size: number; readonly parent?: Locale }};\nexport type RuntimeWebAssets = {{ readonly schema: number; readonly target: string; readonly mode: \"runtime\" | \"hybrid\"; readonly defaultLocale: Locale; readonly supportedLocales: readonly Locale[]; readonly manifest: string; readonly platformBundle: string; readonly idMap: string; readonly idMapHash: string; readonly metadata: string; readonly packs: readonly RuntimeWebPackAsset[] }};\nexport type HybridWebAssets = {{ readonly schema: number; readonly target: string; readonly mode: \"hybrid\"; readonly defaultLocale: Locale; readonly supportedLocales: readonly Locale[]; readonly staticMessagesRoot: string; readonly runtimeAssets: string; readonly metadata: string; readonly staticMessageIds: readonly MessageId[]; readonly runtimeMessageIds: readonly MessageId[] }};\nexport type Mf2RuntimeParts = {{ readonly manifest: unknown; readonly idMap: unknown; readonly packs: Record<string, Uint8Array | ArrayBuffer> }};\nexport type Mf2RuntimeInstance = {{ defaultLocale(): string; supportedLocales(): string[]; negotiateLocale(requested?: string | readonly string[]): string; hasMessage(key: string): boolean; format(locale: string, key: string, args?: unknown): string }};\nexport type Mf2RuntimeClass = {{ fromParts(parts: Mf2RuntimeParts): Mf2RuntimeInstance }};\nexport type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;\nexport type HybridLoaderOptions = {{ readonly baseUrl?: string; readonly fetch?: FetchLike; readonly cacheKey?: string; readonly cache?: boolean }};\nexport type HybridFormatOptions = HybridLoaderOptions & {{ readonly locales?: string | readonly string[] }};\n",
-        render_web_typescript_metadata_types(
-            default_locale,
-            supported_locales,
-            namespaces,
-            message_metadata
-        )
-    )
+    let manifest_type = if dto_types {
+        "Mf2WebManifest"
+    } else {
+        "unknown"
+    };
+    let mut output = String::new();
+    if dto_types {
+        output.push_str("import type { Manifest as Mf2WebManifest } from \"./dto/ts\";\n\n");
+    }
+    output.push_str(&render_web_typescript_metadata_types(
+        default_locale,
+        supported_locales,
+        namespaces,
+        message_metadata,
+    ));
+    output.push_str("export type StaticMessages = Record<string, unknown>;\nexport type Mf2RuntimeArg = string | number | boolean | { readonly type: \"datetime\"; readonly unixMilliseconds: number } | { readonly type: \"datetime\"; readonly unixSeconds: number } | { readonly type: \"currency\"; readonly value: number; readonly code: string };\nexport type Mf2RuntimeArgs = Record<string, Mf2RuntimeArg>;\nexport type RuntimeWebPackAsset = { readonly locale: Locale; readonly url: string; readonly kind: string; readonly hash: string; readonly size: number; readonly parent?: Locale };\nexport type RuntimeWebAssets = { readonly schema: number; readonly target: string; readonly mode: \"runtime\" | \"hybrid\"; readonly defaultLocale: Locale; readonly supportedLocales: readonly Locale[]; readonly manifest: string; readonly platformBundle: string; readonly idMap: string; readonly idMapHash: string; readonly metadata: string; readonly packs: readonly RuntimeWebPackAsset[] };\nexport type HybridWebAssets = { readonly schema: number; readonly target: string; readonly mode: \"hybrid\"; readonly defaultLocale: Locale; readonly supportedLocales: readonly Locale[]; readonly staticMessagesRoot: string; readonly runtimeAssets: string; readonly metadata: string; readonly staticMessageIds: readonly MessageId[]; readonly runtimeMessageIds: readonly MessageId[] };\nexport type Mf2IdMap = Record<string, number>;\nexport type Mf2RuntimeParts = { readonly manifest: ");
+    output.push_str(manifest_type);
+    output.push_str("; readonly idMap: Mf2IdMap; readonly packs: Record<string, Uint8Array | ArrayBuffer> };\nexport type Mf2RuntimeInstance = { defaultLocale(): string; supportedLocales(): string[]; negotiateLocale(requested?: string | readonly string[]): string; hasMessage(key: string): boolean; format(locale: string, key: string, args?: unknown): string };\nexport type Mf2RuntimeClass = { fromParts(parts: Mf2RuntimeParts): Mf2RuntimeInstance };\nexport type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;\nexport type HybridLoaderOptions = { readonly baseUrl?: string; readonly fetch?: FetchLike; readonly cacheKey?: string; readonly cache?: boolean };\nexport type HybridFormatOptions = HybridLoaderOptions & { readonly locales?: string | readonly string[] };\n");
+    output
 }
 
 fn render_hybrid_loaders(
@@ -476,6 +489,7 @@ fn render_hybrid_loaders(
     runtime_assets: &RuntimeWebAssets,
     supported_locales: &[String],
     static_namespaces: &[String],
+    dto_types: bool,
 ) -> Result<String, HybridWebBuildError> {
     let hybrid_assets_json = serde_json::to_string_pretty(hybrid_assets)?;
     let runtime_assets_json = serde_json::to_string_pretty(runtime_assets)?;
@@ -497,8 +511,11 @@ fn render_hybrid_loaders(
         format!("\n{}\n", loader_entries.join(",\n"))
     };
     let mut output = String::new();
+    if dto_types {
+        output.push_str("import type { Manifest as Mf2WebManifest } from \"./dto/ts\";\n");
+    }
     output.push_str(
-        "import { MESSAGE_NAMESPACES } from \"./types\";\nimport type { ArgsFor, FetchLike, HybridFormatOptions, HybridLoaderOptions, HybridWebAssets, Locale, MessageId, Mf2RuntimeClass, Mf2RuntimeInstance, Mf2RuntimeParts, Namespace, RuntimeWebAssets, RuntimeWebPackAsset, StaticMessages } from \"./types\";\n\n",
+        "import { MESSAGE_NAMESPACES } from \"./types\";\nimport type { ArgsFor, FetchLike, HybridFormatOptions, HybridLoaderOptions, HybridWebAssets, Locale, MessageId, Mf2IdMap, Mf2RuntimeClass, Mf2RuntimeInstance, Mf2RuntimeParts, Namespace, RuntimeWebAssets, RuntimeWebPackAsset, StaticMessages } from \"./types\";\n\n",
     );
     output.push_str("export const HYBRID_ASSETS = ");
     output.push_str(&hybrid_assets_json);
@@ -566,6 +583,36 @@ export function runtimeIdMapUrl(baseUrl = ""): string {
   return resolveMf2AssetUrl(baseUrl, RUNTIME_ASSETS.idMap);
 }
 
+"#,
+    );
+    output.push_str(
+        "export async function loadManifest(options: HybridLoaderOptions = {}): Promise<",
+    );
+    output.push_str(if dto_types {
+        "Mf2WebManifest"
+    } else {
+        "unknown"
+    });
+    output.push_str(
+        r#"> {
+  const baseUrl = options.baseUrl ?? "";
+  const manifest = await fetchJsonCached(runtimeManifestUrl(baseUrl), options, "manifest");
+"#,
+    );
+    if dto_types {
+        output.push_str("  return manifest as Mf2WebManifest;\n");
+    } else {
+        output.push_str("  return manifest;\n");
+    }
+    output.push_str(
+        r#"}
+
+export async function loadIdMap(options: HybridLoaderOptions = {}): Promise<Mf2IdMap> {
+  const baseUrl = options.baseUrl ?? "";
+  const idMap = await fetchJsonCached(runtimeIdMapUrl(baseUrl), options, "id-map");
+  return idMap as Mf2IdMap;
+}
+
 export function packAsset(locale: Locale): RuntimeWebPackAsset {
   const pack = RUNTIME_ASSETS.packs.find((entry) => entry.locale === locale);
   if (!pack) {
@@ -595,9 +642,8 @@ export async function loadLocale(locale: Locale, options: HybridLoaderOptions = 
 }
 
 export async function loadRuntimeParts(options: HybridLoaderOptions = {}): Promise<Mf2RuntimeParts> {
-  const baseUrl = options.baseUrl ?? "";
-  const manifest = await fetchJsonCached(runtimeManifestUrl(baseUrl), options, "manifest");
-  const idMap = await fetchJsonCached(runtimeIdMapUrl(baseUrl), options, "id-map");
+  const manifest = await loadManifest(options);
+  const idMap = await loadIdMap(options);
   const packs: Record<string, Uint8Array> = {};
   await Promise.all(RUNTIME_ASSETS.supportedLocales.map(async (locale) => {
     packs[locale] = await loadLocale(locale, options);
