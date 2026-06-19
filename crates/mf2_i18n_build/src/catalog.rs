@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::ArgSpec;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct Catalog {
     pub schema: u32,
     pub project: String,
@@ -12,6 +13,7 @@ pub struct Catalog {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct CatalogMessage {
     pub key: String,
     pub id: u32,
@@ -22,6 +24,7 @@ pub struct CatalogMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct CatalogFeatures {
     pub select: bool,
     pub plural_cardinal: bool,
@@ -30,6 +33,7 @@ pub struct CatalogFeatures {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct SourceRef {
     pub file: String,
     pub line: u32,

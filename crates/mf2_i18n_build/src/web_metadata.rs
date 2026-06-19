@@ -8,6 +8,7 @@ use crate::parser::{Expr, Message, Segment, SelectExpr, SelectKind, VarExpr, par
 use crate::project_catalogs::{ProjectCatalog, ProjectCatalogMessage};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct WebMessageMetadata {
     pub id: String,
     pub namespace: String,
@@ -16,6 +17,7 @@ pub struct WebMessageMetadata {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 #[serde(rename_all = "kebab-case")]
 pub enum HybridMessageDelivery {
     StaticJson,
@@ -23,6 +25,7 @@ pub enum HybridMessageDelivery {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct HybridMessageRoute {
     pub id: String,
     pub namespace: String,
@@ -31,12 +34,14 @@ pub struct HybridMessageRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct HybridMessagePlan {
     pub static_messages: Vec<HybridMessageRoute>,
     pub runtime_messages: Vec<HybridMessageRoute>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct WebMessageArg {
     pub name: String,
     #[serde(rename = "type")]

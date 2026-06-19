@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct Manifest {
     pub schema: u32,
     pub release_id: String,
@@ -22,6 +23,7 @@ pub struct Manifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct PackEntry {
     pub kind: String,
     pub url: String,
@@ -34,6 +36,7 @@ pub struct PackEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct ManifestSigning {
     pub sig_alg: String,
     pub key_id: String,

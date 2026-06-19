@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 #[serde(rename_all = "lowercase")]
 pub enum ArgType {
     String,
@@ -13,6 +14,7 @@ pub enum ArgType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct ArgSpec {
     pub name: String,
     #[serde(rename = "type")]
@@ -21,6 +23,7 @@ pub struct ArgSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 pub struct MessageSpec {
     pub key: String,
     pub args: Vec<ArgSpec>,

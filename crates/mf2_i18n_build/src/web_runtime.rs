@@ -116,6 +116,7 @@ impl RuntimeWebBuildOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeWebAssets {
     pub schema: u32,
@@ -132,6 +133,7 @@ pub struct RuntimeWebAssets {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeWebPackAsset {
     pub locale: String,

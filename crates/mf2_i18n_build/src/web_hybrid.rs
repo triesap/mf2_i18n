@@ -126,6 +126,7 @@ impl HybridWebBuildOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "dto-bindgen", derive(dto_bindgen::Dto))]
 #[serde(rename_all = "camelCase")]
 pub struct HybridWebAssets {
     pub schema: u32,
