@@ -221,8 +221,10 @@ out_dir = "web-generated"
         assert!(out_dir.join("dto/dto_bindgen.generated.json").exists());
         assert!(out_dir.join("dto/ts/catalog.ts").exists());
         assert!(out_dir.join("dto/ts/index.ts").exists());
+        assert!(!out_dir.join("dto/python").exists());
         let manifest = fs::read_to_string(out_dir.join("mf2-web-manifest.json")).expect("manifest");
         assert!(manifest.contains("dto/ts/catalog.ts"));
+        assert!(!manifest.contains("dto/python"));
 
         run_build_web(&BuildWebOptions {
             config_path,
