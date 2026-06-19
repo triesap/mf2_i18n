@@ -104,6 +104,7 @@ mod tests {
     use super::{BuildWebOptions, run_build_web};
     use std::fs;
     use std::path::PathBuf;
+    use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -231,6 +232,87 @@ out_dir = "web-generated"
             dto_types: true,
         })
         .expect("check");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "dto-bindgen")]
+    #[test]
+    fn generated_dto_typescript_typechecks_when_requested() {
+        let tsc = match std::env::var("MF2_I18N_TSC") {
+            Ok(path) => path,
+            Err(_) if std::env::var("MF2_I18N_RUN_TSC").is_ok() => "tsc".to_string(),
+            Err(_) => return,
+        };
+        let dir = temp_dir();
+        let locales_dir = dir.join("locales").join("en");
+        fs::create_dir_all(&locales_dir).expect("locale");
+        fs::write(
+            locales_dir.join("common.json"),
+            r#"{"home":{"title":"Hi"}}"#,
+        )
+        .expect("write");
+
+        let config_path = dir.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "docs"
+mode = "plain-json"
+out_dir = "web-generated"
+"#,
+        )
+        .expect("config");
+
+        run_build_web(&BuildWebOptions {
+            config_path,
+            target_name: "docs".to_string(),
+            out_dir: None,
+            check: false,
+            dto_types: true,
+        })
+        .expect("build");
+
+        fs::write(
+            dir.join("tsconfig.dto.json"),
+            r#"{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["web-generated/dto/ts/**/*.ts"]
+}
+"#,
+        )
+        .expect("tsconfig");
+        let tsc_path = PathBuf::from(&tsc);
+        let tsc_command = if tsc_path.components().count() > 1 {
+            fs::canonicalize(&tsc_path).unwrap_or(tsc_path)
+        } else {
+            tsc_path
+        };
+        let output = Command::new(&tsc_command)
+            .arg("-p")
+            .arg(dir.join("tsconfig.dto.json"))
+            .current_dir(&dir)
+            .output()
+            .unwrap_or_else(|source| panic!("failed to run {tsc}: {source}"));
+        assert!(
+            output.status.success(),
+            "{tsc} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
