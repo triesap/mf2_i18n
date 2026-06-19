@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
@@ -8,6 +9,7 @@ use crate::web::{WebArtifactError, WebArtifactFile};
 
 const DTO_ARTIFACT_DIR: &str = "dto";
 const DTO_CONFIG_FILE: &str = "dto_bindgen.toml";
+static DTO_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 pub enum DtoExportError {
@@ -112,10 +114,12 @@ impl DtoTempDir {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
+        let counter = DTO_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "mf2_i18n_dto_export_{}_{}",
+            "mf2_i18n_dto_export_{}_{}_{}",
             std::process::id(),
-            nanos
+            nanos,
+            counter
         ));
         fs::create_dir_all(&path)?;
         Ok(Self { path })
@@ -138,11 +142,7 @@ mod tests {
 
     #[test]
     fn web_dto_artifacts_export_one_manifest_family() {
-        let files = web_dto_artifact_files().expect("dto artifacts");
-        let paths = files
-            .iter()
-            .map(|file| file.relative_path().to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
+        let paths = artifact_paths();
 
         assert!(paths.iter().any(|path| path == "dto/ts/manifest.ts"));
         assert!(
@@ -172,5 +172,25 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn web_dto_artifacts_do_not_emit_python_package() {
+        let paths = artifact_paths();
+
+        assert!(
+            paths
+                .iter()
+                .all(|path| !path.starts_with("dto/python/") && !path.ends_with(".py"))
+        );
+        assert!(!paths.iter().any(|path| path.ends_with("py.typed")));
+    }
+
+    fn artifact_paths() -> Vec<String> {
+        web_dto_artifact_files()
+            .expect("dto artifacts")
+            .iter()
+            .map(|file| file.relative_path().to_string_lossy().into_owned())
+            .collect()
     }
 }
