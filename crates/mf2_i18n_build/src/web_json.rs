@@ -12,7 +12,7 @@ use crate::project::{ProjectError, ProjectLayout, resolve_config_relative_path};
 use crate::project_catalogs::{ProjectCatalog, ProjectCatalogError, ProjectCatalogMessage};
 use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
-    WebArtifactWriteOutput, write_web_artifacts,
+    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts, write_web_artifacts,
 };
 use crate::web_metadata::{
     WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
@@ -93,6 +93,7 @@ pub struct PlainJsonWebBuildOptions {
     target_name: String,
     out_dir_override: Option<PathBuf>,
     check: bool,
+    dto_types: bool,
 }
 
 impl PlainJsonWebBuildOptions {
@@ -102,6 +103,7 @@ impl PlainJsonWebBuildOptions {
             target_name: target_name.into(),
             out_dir_override: None,
             check: false,
+            dto_types: false,
         }
     }
 
@@ -112,6 +114,11 @@ impl PlainJsonWebBuildOptions {
 
     pub fn with_check(mut self, check: bool) -> Self {
         self.check = check;
+        self
+    }
+
+    pub fn with_dto_types(mut self, dto_types: bool) -> Self {
+        self.dto_types = dto_types;
         self
     }
 
@@ -129,6 +136,10 @@ impl PlainJsonWebBuildOptions {
 
     pub fn check(&self) -> bool {
         self.check
+    }
+
+    pub fn dto_types(&self) -> bool {
+        self.dto_types
     }
 }
 
@@ -317,6 +328,8 @@ pub enum PlainJsonWebBuildError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Artifacts(#[from] WebArtifactError),
+    #[error(transparent)]
+    DtoTypes(#[from] WebDtoTypeArtifactError),
     #[error("missing web target {0}")]
     MissingTarget(String),
     #[error("web target {target} must use plain-json mode")]
@@ -437,6 +450,9 @@ pub fn build_plain_json_web_target(
         "index.ts",
         b"export * from \"./types\";\nexport * from \"./loaders\";\n".to_vec(),
     )?);
+    if options.dto_types() {
+        append_web_dto_artifacts(&mut artifact_files)?;
+    }
 
     let out_dir = options
         .out_dir_override()

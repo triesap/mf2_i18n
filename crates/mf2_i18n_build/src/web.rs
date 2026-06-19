@@ -151,6 +151,31 @@ pub enum WebArtifactError {
     StaleFiles(Vec<String>),
 }
 
+#[derive(Debug, Error)]
+pub enum WebDtoTypeArtifactError {
+    #[error("DTO type artifacts require the mf2_i18n_build `dto-bindgen` feature")]
+    FeatureDisabled,
+    #[cfg(feature = "dto-bindgen")]
+    #[error(transparent)]
+    Export(#[from] crate::dto_export::DtoExportError),
+}
+
+pub fn append_web_dto_artifacts(
+    files: &mut Vec<WebArtifactFile>,
+) -> Result<(), WebDtoTypeArtifactError> {
+    #[cfg(feature = "dto-bindgen")]
+    {
+        files.extend(crate::dto_export::web_dto_artifact_files()?);
+        Ok(())
+    }
+
+    #[cfg(not(feature = "dto-bindgen"))]
+    {
+        let _ = files;
+        Err(WebDtoTypeArtifactError::FeatureDisabled)
+    }
+}
+
 pub fn write_web_artifacts(
     options: &WebArtifactWriteOptions,
     input: &WebArtifactManifestInput,

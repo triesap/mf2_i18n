@@ -14,7 +14,7 @@ use crate::project_pipeline::{
 };
 use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
-    WebArtifactWriteOutput, write_web_artifacts,
+    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts, write_web_artifacts,
 };
 use crate::web_metadata::{
     WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
@@ -35,6 +35,7 @@ pub struct RuntimeWebBuildOptions {
     target_name: String,
     out_dir_override: Option<PathBuf>,
     check: bool,
+    dto_types: bool,
 }
 
 impl RuntimeWebBuildOptions {
@@ -44,6 +45,7 @@ impl RuntimeWebBuildOptions {
             target_name: target_name.into(),
             out_dir_override: None,
             check: false,
+            dto_types: false,
         }
     }
 
@@ -54,6 +56,11 @@ impl RuntimeWebBuildOptions {
 
     pub fn with_check(mut self, check: bool) -> Self {
         self.check = check;
+        self
+    }
+
+    pub fn with_dto_types(mut self, dto_types: bool) -> Self {
+        self.dto_types = dto_types;
         self
     }
 
@@ -71,6 +78,10 @@ impl RuntimeWebBuildOptions {
 
     pub fn check(&self) -> bool {
         self.check
+    }
+
+    pub fn dto_types(&self) -> bool {
+        self.dto_types
     }
 }
 
@@ -160,6 +171,8 @@ pub enum RuntimeWebBuildError {
     #[error(transparent)]
     Artifacts(#[from] WebArtifactError),
     #[error(transparent)]
+    DtoTypes(#[from] WebDtoTypeArtifactError),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -217,13 +230,16 @@ pub fn build_runtime_web_target(
         runtime_assets_from_manifest(&target.name, runtime_output.manifest_path())?;
 
     let asset_files = runtime_asset_files(temp_dir.path(), &runtime_assets, &message_metadata)?;
-    let code_files = runtime_code_files(
+    let mut code_files = runtime_code_files(
         &runtime_assets,
         runtime_output.default_locale(),
         runtime_output.supported_locales(),
         &namespaces,
         &message_metadata,
     )?;
+    if options.dto_types() {
+        append_web_dto_artifacts(&mut code_files)?;
+    }
     let code_out_dir = options
         .out_dir_override()
         .map(PathBuf::from)

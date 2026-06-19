@@ -15,7 +15,7 @@ use crate::project_pipeline::{
 };
 use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
-    WebArtifactWriteOutput, write_web_artifacts,
+    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts, write_web_artifacts,
 };
 use crate::web_json::{WebJsonExportError, insert_nested_message, plain_text_message};
 use crate::web_metadata::{
@@ -40,6 +40,7 @@ pub struct HybridWebBuildOptions {
     target_name: String,
     out_dir_override: Option<PathBuf>,
     check: bool,
+    dto_types: bool,
 }
 
 impl HybridWebBuildOptions {
@@ -49,6 +50,7 @@ impl HybridWebBuildOptions {
             target_name: target_name.into(),
             out_dir_override: None,
             check: false,
+            dto_types: false,
         }
     }
 
@@ -59,6 +61,11 @@ impl HybridWebBuildOptions {
 
     pub fn with_check(mut self, check: bool) -> Self {
         self.check = check;
+        self
+    }
+
+    pub fn with_dto_types(mut self, dto_types: bool) -> Self {
+        self.dto_types = dto_types;
         self
     }
 
@@ -76,6 +83,10 @@ impl HybridWebBuildOptions {
 
     pub fn check(&self) -> bool {
         self.check
+    }
+
+    pub fn dto_types(&self) -> bool {
+        self.dto_types
     }
 }
 
@@ -157,6 +168,8 @@ pub enum HybridWebBuildError {
     WebJson(#[from] WebJsonExportError),
     #[error(transparent)]
     Artifacts(#[from] WebArtifactError),
+    #[error(transparent)]
+    DtoTypes(#[from] WebDtoTypeArtifactError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -292,6 +305,9 @@ pub fn build_hybrid_web_target(
         "index.ts",
         b"export * from \"./types\";\nexport * from \"./loaders\";\n".to_vec(),
     )?);
+    if options.dto_types() {
+        append_web_dto_artifacts(&mut artifact_files)?;
+    }
 
     let out_dir = options
         .out_dir_override()

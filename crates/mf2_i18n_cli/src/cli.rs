@@ -218,7 +218,7 @@ fn next_value(flag: &str, iter: &mut impl Iterator<Item = String>) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: mf2_i18n_cli init [--preset <name>] [--source-layout <name>] [--target <name>] [--config <path>] [--json]\n       mf2_i18n_cli detect [--cwd <path>] [--json]\n       mf2_i18n_cli build --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli check --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli scaffold missing --source <name> --locale <locale> [--config <path>] [--json]\n       mf2_i18n_cli doctor [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check] [--json]\n       mf2_i18n_cli build-native --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]".to_string()
+    "usage: mf2_i18n_cli init [--preset <name>] [--source-layout <name>] [--target <name>] [--config <path>] [--json]\n       mf2_i18n_cli detect [--cwd <path>] [--json]\n       mf2_i18n_cli build --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli check --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli scaffold missing --source <name> --locale <locale> [--config <path>] [--json]\n       mf2_i18n_cli doctor [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check] [--dto-types] [--json]\n       mf2_i18n_cli build-native --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]".to_string()
 }
 
 fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppError> {
@@ -277,6 +277,7 @@ fn parse_build_web_options(args: Vec<String>) -> Result<BuildWebOptions, CliAppE
     let mut out_dir = None;
     let mut config_path = PathBuf::from("mf2_i18n.toml");
     let mut check = false;
+    let mut dto_types = false;
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -284,6 +285,7 @@ fn parse_build_web_options(args: Vec<String>) -> Result<BuildWebOptions, CliAppE
             "--out" => out_dir = Some(PathBuf::from(next_value("--out", &mut iter)?)),
             "--config" => config_path = PathBuf::from(next_value("--config", &mut iter)?),
             "--check" => check = true,
+            "--dto-types" => dto_types = true,
             "--help" | "-h" => return Err(CliAppError::Usage(usage())),
             _ => return Err(CliAppError::Usage(usage())),
         }
@@ -294,6 +296,7 @@ fn parse_build_web_options(args: Vec<String>) -> Result<BuildWebOptions, CliAppE
         target_name,
         out_dir,
         check,
+        dto_types,
     })
 }
 
@@ -542,11 +545,13 @@ mod tests {
             "--config".to_string(),
             "mf2_i18n.toml".to_string(),
             "--check".to_string(),
+            "--dto-types".to_string(),
         ];
         let options = parse_build_web_options(args).expect("options");
         assert_eq!(options.target_name, "docs");
         assert!(options.out_dir.expect("out").ends_with("web-generated"));
         assert!(options.check);
+        assert!(options.dto_types);
     }
 
     #[test]

@@ -7,6 +7,8 @@ pub mod catalog_reader;
 pub mod compiler;
 pub mod config;
 pub mod diagnostic;
+#[cfg(feature = "dto-bindgen")]
+pub mod dto_export;
 pub mod error;
 pub mod extract;
 pub mod extract_pipeline;

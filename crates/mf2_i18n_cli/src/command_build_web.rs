@@ -33,6 +33,7 @@ pub struct BuildWebOptions {
     pub target_name: String,
     pub out_dir: Option<PathBuf>,
     pub check: bool,
+    pub dto_types: bool,
 }
 
 pub fn run_build_web(options: &BuildWebOptions) -> Result<(), BuildWebCommandError> {
@@ -48,7 +49,8 @@ pub fn run_build_web(options: &BuildWebOptions) -> Result<(), BuildWebCommandErr
         WebTargetMode::PlainJson => {
             let mut build_options =
                 PlainJsonWebBuildOptions::new(&options.config_path, &options.target_name)
-                    .with_check(options.check);
+                    .with_check(options.check)
+                    .with_dto_types(options.dto_types);
 
             if let Some(out_dir) = &options.out_dir {
                 build_options = build_options.with_out_dir(out_dir);
@@ -59,7 +61,8 @@ pub fn run_build_web(options: &BuildWebOptions) -> Result<(), BuildWebCommandErr
         WebTargetMode::Runtime => {
             let mut build_options =
                 RuntimeWebBuildOptions::new(&options.config_path, &options.target_name)
-                    .with_check(options.check);
+                    .with_check(options.check)
+                    .with_dto_types(options.dto_types);
 
             if let Some(out_dir) = &options.out_dir {
                 build_options = build_options.with_out_dir(out_dir);
@@ -70,7 +73,8 @@ pub fn run_build_web(options: &BuildWebOptions) -> Result<(), BuildWebCommandErr
         WebTargetMode::Docusaurus => {
             let mut build_options =
                 DocusaurusWebBuildOptions::new(&options.config_path, &options.target_name)
-                    .with_check(options.check);
+                    .with_check(options.check)
+                    .with_dto_types(options.dto_types);
 
             if let Some(out_dir) = &options.out_dir {
                 build_options = build_options.with_out_dir(out_dir);
@@ -81,7 +85,8 @@ pub fn run_build_web(options: &BuildWebOptions) -> Result<(), BuildWebCommandErr
         WebTargetMode::Hybrid => {
             let mut build_options =
                 HybridWebBuildOptions::new(&options.config_path, &options.target_name)
-                    .with_check(options.check);
+                    .with_check(options.check)
+                    .with_dto_types(options.dto_types);
 
             if let Some(out_dir) = &options.out_dir {
                 build_options = build_options.with_out_dir(out_dir);
@@ -152,6 +157,7 @@ out_dir = "web-generated"
             target_name: "docs".to_string(),
             out_dir: None,
             check: false,
+            dto_types: false,
         })
         .expect("build");
 
@@ -165,6 +171,64 @@ out_dir = "web-generated"
             target_name: "docs".to_string(),
             out_dir: Some(out_dir),
             check: true,
+            dto_types: false,
+        })
+        .expect("check");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "dto-bindgen")]
+    #[test]
+    fn builds_named_web_target_with_dto_types() {
+        let dir = temp_dir();
+        let locales_dir = dir.join("locales").join("en");
+        fs::create_dir_all(&locales_dir).expect("locale");
+        fs::write(
+            locales_dir.join("common.json"),
+            r#"{"home":{"title":"Hi"}}"#,
+        )
+        .expect("write");
+
+        let config_path = dir.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[web.targets]]
+name = "docs"
+mode = "plain-json"
+out_dir = "web-generated"
+"#,
+        )
+        .expect("config");
+
+        run_build_web(&BuildWebOptions {
+            config_path: config_path.clone(),
+            target_name: "docs".to_string(),
+            out_dir: None,
+            check: false,
+            dto_types: true,
+        })
+        .expect("build");
+
+        let out_dir = dir.join("web-generated");
+        assert!(out_dir.join("dto/dto_bindgen.generated.json").exists());
+        assert!(out_dir.join("dto/ts/catalog.ts").exists());
+        assert!(out_dir.join("dto/ts/index.ts").exists());
+        let manifest = fs::read_to_string(out_dir.join("mf2-web-manifest.json")).expect("manifest");
+        assert!(manifest.contains("dto/ts/catalog.ts"));
+
+        run_build_web(&BuildWebOptions {
+            config_path,
+            target_name: "docs".to_string(),
+            out_dir: Some(out_dir),
+            check: true,
+            dto_types: true,
         })
         .expect("check");
 
@@ -207,6 +271,7 @@ generated_at = "2026-02-01T00:00:00Z"
             target_name: "runtime".to_string(),
             out_dir: None,
             check: false,
+            dto_types: false,
         })
         .expect("build");
 
@@ -261,6 +326,7 @@ namespaces = ["common"]
             target_name: "hybrid".to_string(),
             out_dir: None,
             check: false,
+            dto_types: false,
         })
         .expect("build");
 
@@ -277,6 +343,7 @@ namespaces = ["common"]
             target_name: "hybrid".to_string(),
             out_dir: Some(out_dir),
             check: true,
+            dto_types: false,
         })
         .expect("check");
 
@@ -328,6 +395,7 @@ namespaces = ["home", "docs"]
             target_name: "docs".to_string(),
             out_dir: None,
             check: false,
+            dto_types: false,
         })
         .expect("build");
 

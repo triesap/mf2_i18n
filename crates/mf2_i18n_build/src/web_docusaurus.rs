@@ -13,7 +13,7 @@ use crate::project_catalogs::{
 };
 use crate::web::{
     WebArtifactError, WebArtifactFile, WebArtifactManifestInput, WebArtifactWriteOptions,
-    WebArtifactWriteOutput, write_web_artifacts,
+    WebArtifactWriteOutput, WebDtoTypeArtifactError, append_web_dto_artifacts, write_web_artifacts,
 };
 use crate::web_metadata::{
     WebMessageMetadata, WebMessageMetadataError, collect_web_message_metadata,
@@ -32,6 +32,7 @@ pub struct DocusaurusWebBuildOptions {
     target_name: String,
     out_dir_override: Option<PathBuf>,
     check: bool,
+    dto_types: bool,
 }
 
 impl DocusaurusWebBuildOptions {
@@ -41,6 +42,7 @@ impl DocusaurusWebBuildOptions {
             target_name: target_name.into(),
             out_dir_override: None,
             check: false,
+            dto_types: false,
         }
     }
 
@@ -51,6 +53,11 @@ impl DocusaurusWebBuildOptions {
 
     pub fn with_check(mut self, check: bool) -> Self {
         self.check = check;
+        self
+    }
+
+    pub fn with_dto_types(mut self, dto_types: bool) -> Self {
+        self.dto_types = dto_types;
         self
     }
 
@@ -68,6 +75,10 @@ impl DocusaurusWebBuildOptions {
 
     pub fn check(&self) -> bool {
         self.check
+    }
+
+    pub fn dto_types(&self) -> bool {
+        self.dto_types
     }
 }
 
@@ -119,6 +130,8 @@ pub enum DocusaurusWebBuildError {
     Metadata(#[from] WebMessageMetadataError),
     #[error(transparent)]
     Artifacts(#[from] WebArtifactError),
+    #[error(transparent)]
+    DtoTypes(#[from] WebDtoTypeArtifactError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -276,6 +289,19 @@ pub fn build_docusaurus_web_target(
         .out_dir_override()
         .map(PathBuf::from)
         .unwrap_or_else(|| resolve_config_relative_path(options.config_path(), &target.out_dir));
+    let mut artifact_files = vec![WebArtifactFile::new(
+        "messages.ts",
+        render_messages_module(
+            &default_locale,
+            &supported_locales,
+            &generated.code_by_locale,
+        )
+        .into_bytes(),
+    )?];
+    if options.dto_types() {
+        append_web_dto_artifacts(&mut artifact_files)?;
+    }
+
     let artifact_output = write_web_artifacts(
         &WebArtifactWriteOptions::new(out_dir)
             .with_stale_policy(target.stale_policy.unwrap_or(WebStalePolicy::Fail))
@@ -288,15 +314,7 @@ pub fn build_docusaurus_web_target(
             supported_locales: supported_locales.clone(),
             namespaces: namespaces.clone(),
         },
-        vec![WebArtifactFile::new(
-            "messages.ts",
-            render_messages_module(
-                &default_locale,
-                &supported_locales,
-                &generated.code_by_locale,
-            )
-            .into_bytes(),
-        )?],
+        artifact_files,
     )?;
 
     Ok(DocusaurusWebBuildOutput {

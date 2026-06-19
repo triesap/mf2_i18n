@@ -11,6 +11,10 @@ description = "CLI tools for building and validating Unicode MessageFormat v2 (M
 keywords = ["i18n", "messageformat", "localization", "unicode", "mf2"]
 categories = ["internationalization", "text-processing"]
 
+[features]
+default = []
+dto-bindgen = ["mf2_i18n_build/dto-bindgen"]
+
 [dependencies]
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
