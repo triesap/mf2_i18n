@@ -36,6 +36,9 @@ pub fn web_dto_artifact_files() -> Result<Vec<WebArtifactFile>, DtoExportError> 
             crate::web_metadata::HybridMessagePlan,
             crate::web_metadata::HybridMessageRoute,
             crate::web_hybrid::HybridWebAssets,
+            // The web DTO package owns build-manifest shapes only. Runtime
+            // manifest DTOs stay out of this package until they have separate
+            // target names or a separate output package.
             crate::manifest::Manifest,
             crate::manifest::ManifestSigning,
             crate::model::MessageSpec,
@@ -126,5 +129,48 @@ impl DtoTempDir {
 impl Drop for DtoTempDir {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.path).ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::web_dto_artifact_files;
+
+    #[test]
+    fn web_dto_artifacts_export_one_manifest_family() {
+        let files = web_dto_artifact_files().expect("dto artifacts");
+        let paths = files
+            .iter()
+            .map(|file| file.relative_path().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(paths.iter().any(|path| path == "dto/ts/manifest.ts"));
+        assert!(
+            paths
+                .iter()
+                .any(|path| path == "dto/ts/manifest_signing.ts")
+        );
+        assert!(paths.iter().any(|path| path == "dto/ts/pack_entry.ts"));
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.ends_with("/manifest.ts"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.ends_with("/manifest_signing.ts"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.ends_with("/pack_entry.ts"))
+                .count(),
+            1
+        );
     }
 }
