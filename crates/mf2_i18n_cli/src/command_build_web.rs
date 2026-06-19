@@ -248,10 +248,11 @@ out_dir = "web-generated"
     #[cfg(feature = "dto-bindgen")]
     #[test]
     fn generated_dto_typescript_typechecks_when_requested() {
-        let tsc = match std::env::var("MF2_I18N_TSC") {
-            Ok(path) => path,
-            Err(_) if std::env::var("MF2_I18N_RUN_TSC").is_ok() => "tsc".to_string(),
-            Err(_) => return,
+        let Some(tsc) = discover_typescript_compiler() else {
+            eprintln!(
+                "skipping generated DTO TypeScript validation; set MF2_I18N_TSC or make tsc available"
+            );
+            return;
         };
         let dir = temp_dir();
         let locales_dir = dir.join("locales").join("en");
@@ -261,6 +262,7 @@ out_dir = "web-generated"
             r#"{"home":{"title":"Hi"}}"#,
         )
         .expect("write");
+        fs::write(dir.join("id_salt.txt"), "salt").expect("salt");
 
         let config_path = dir.join("mf2_i18n.toml");
         fs::write(
@@ -272,21 +274,44 @@ source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
 
 [[web.targets]]
-name = "docs"
-mode = "plain-json"
+name = "runtime"
+mode = "runtime"
 out_dir = "web-generated"
+release_id = "test-runtime"
+generated_at = "2026-02-01T00:00:00Z"
 "#,
         )
         .expect("config");
 
         run_build_web(&BuildWebOptions {
             config_path,
-            target_name: "docs".to_string(),
+            target_name: "runtime".to_string(),
             out_dir: None,
             check: false,
             dto_types: true,
         })
         .expect("build");
+
+        fs::write(
+            dir.join("consumer.ts"),
+            r#"import { loadManifest, loadRuntimeParts } from "./web-generated/index";
+import type { Mf2IdMap, Mf2RuntimeParts, Mf2WebManifest } from "./web-generated/index";
+
+async function readRuntime(): Promise<Mf2RuntimeParts> {
+  const manifest: Mf2WebManifest = await loadManifest();
+  const parts: Mf2RuntimeParts = await loadRuntimeParts();
+  const idMap: Mf2IdMap = parts.idMap;
+  const sameManifest: Mf2WebManifest = parts.manifest;
+  void manifest.schema;
+  void idMap;
+  void sameManifest;
+  return parts;
+}
+
+void readRuntime;
+"#,
+        )
+        .expect("consumer");
 
         fs::write(
             dir.join("tsconfig.dto.json"),
@@ -299,7 +324,7 @@ out_dir = "web-generated"
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["web-generated/dto/ts/**/*.ts"]
+  "include": ["consumer.ts", "web-generated/**/*.ts"]
 }
 "#,
         )
@@ -324,6 +349,25 @@ out_dir = "web-generated"
         );
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "dto-bindgen")]
+    fn discover_typescript_compiler() -> Option<String> {
+        if let Ok(path) = std::env::var("MF2_I18N_TSC") {
+            return Some(path);
+        }
+        if std::env::var("MF2_I18N_RUN_TSC").is_ok() {
+            return Some("tsc".to_string());
+        }
+        if Command::new("tsc")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+        {
+            return Some("tsc".to_string());
+        }
+        None
     }
 
     #[test]
