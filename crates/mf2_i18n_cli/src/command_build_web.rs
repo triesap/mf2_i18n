@@ -249,6 +249,11 @@ out_dir = "web-generated"
     #[test]
     fn generated_dto_typescript_typechecks_when_requested() {
         let Some(tsc) = discover_typescript_compiler() else {
+            if typescript_compiler_is_required() {
+                panic!(
+                    "generated DTO TypeScript validation requires tsc; set MF2_I18N_TSC or make tsc available"
+                );
+            }
             eprintln!(
                 "skipping generated DTO TypeScript validation; set MF2_I18N_TSC or make tsc available"
             );
@@ -368,6 +373,30 @@ void readRuntime;
             return Some("tsc".to_string());
         }
         None
+    }
+
+    #[cfg(feature = "dto-bindgen")]
+    fn typescript_compiler_is_required() -> bool {
+        std::env::var("MF2_I18N_REQUIRE_TSC")
+            .ok()
+            .as_deref()
+            .is_some_and(typescript_compiler_required_value)
+    }
+
+    #[cfg(feature = "dto-bindgen")]
+    fn typescript_compiler_required_value(value: &str) -> bool {
+        matches!(value, "1" | "true" | "TRUE" | "yes" | "YES")
+    }
+
+    #[cfg(feature = "dto-bindgen")]
+    #[test]
+    fn parses_required_typescript_validation_flag() {
+        assert!(typescript_compiler_required_value("1"));
+        assert!(typescript_compiler_required_value("true"));
+        assert!(typescript_compiler_required_value("yes"));
+        assert!(!typescript_compiler_required_value(""));
+        assert!(!typescript_compiler_required_value("0"));
+        assert!(!typescript_compiler_required_value("false"));
     }
 
     #[test]
