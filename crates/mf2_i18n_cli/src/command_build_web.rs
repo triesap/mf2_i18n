@@ -104,6 +104,7 @@ mod tests {
     use super::{BuildWebOptions, run_build_web};
     use std::fs;
     use std::path::PathBuf;
+    #[cfg(feature = "dto-bindgen")]
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};

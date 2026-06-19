@@ -1,6 +1,7 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use serde_json::Value;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -9,6 +10,10 @@ pub enum InitCommandError {
     ConfigExists(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("package script argument {name} contains unsupported characters: {value}")]
+    PackageScriptArg { name: &'static str, value: String },
 }
 
 #[derive(Debug, Clone)]
@@ -30,10 +35,24 @@ pub fn run_init(options: &InitOptions) -> Result<InitReport, InitCommandError> {
             options.config_path.display().to_string(),
         ));
     }
+    let config_root = options
+        .config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let package_root = find_package_root(config_root);
+    if let Some(package_root) = package_root.as_deref() {
+        validate_package_script_args(package_root, options)?;
+    }
     if let Some(parent) = options.config_path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(&options.config_path, render_config(options))?;
+    write_starter_locale(config_root, options)?;
+    write_project_salt(config_root)?;
+    write_generated_ignore(config_root)?;
+    if let Some(package_root) = package_root.as_deref() {
+        update_package_scripts(package_root, options)?;
+    }
     Ok(InitReport {
         config_path: options.config_path.clone(),
     })
@@ -61,12 +80,164 @@ typescript = true\n",
     )
 }
 
+fn write_starter_locale(
+    project_root: &Path,
+    options: &InitOptions,
+) -> Result<(), InitCommandError> {
+    match options.source_layout.as_str() {
+        "locale-namespace" | "docusaurus-docs" => {
+            let path = project_root.join("locales/en/app.mf2");
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            if !path.exists() {
+                fs::write(path, "title = TODO\n")?;
+            }
+        }
+        "namespace-locale" => {
+            let path = project_root.join("locales/app/en.mf2");
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            if !path.exists() {
+                fs::write(path, "title = TODO\n")?;
+            }
+        }
+        "single-locale-file" => {
+            let path = project_root.join("locales/en.mf2");
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            if !path.exists() {
+                fs::write(path, "app.title = TODO\n")?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn write_project_salt(project_root: &Path) -> Result<(), InitCommandError> {
+    let salt_path = project_root.join("id_salt.txt");
+    if !salt_path.exists() {
+        fs::write(salt_path, "change-me-project-salt\n")?;
+    }
+    Ok(())
+}
+
+fn write_generated_ignore(project_root: &Path) -> Result<(), InitCommandError> {
+    let generated_dir = project_root.join("src/generated/mf2");
+    fs::create_dir_all(&generated_dir)?;
+    fs::write(generated_dir.join(".gitignore"), "*\n!.gitignore\n")?;
+    Ok(())
+}
+
+fn find_package_root(config_root: &Path) -> Option<PathBuf> {
+    for ancestor in config_root.ancestors() {
+        if ancestor.join("package.json").exists() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+fn update_package_scripts(
+    project_root: &Path,
+    options: &InitOptions,
+) -> Result<(), InitCommandError> {
+    let package_path = project_root.join("package.json");
+    if !package_path.exists() {
+        return Ok(());
+    }
+    let config_path = package_script_config_path(project_root, &options.config_path);
+
+    let contents = fs::read_to_string(&package_path)?;
+    let mut package: Value = serde_json::from_str(&contents)?;
+    let object = package.as_object_mut().ok_or_else(|| {
+        serde_json::Error::io(std::io::Error::other("package root is not object"))
+    })?;
+    let scripts = object
+        .entry("scripts")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    let scripts = scripts
+        .as_object_mut()
+        .ok_or_else(|| serde_json::Error::io(std::io::Error::other("scripts is not object")))?;
+    scripts.insert(
+        "mf2:gen".to_string(),
+        Value::String(format!(
+            "mf2-i18n build-web --config {config_path} --target {}",
+            options.target_name,
+        )),
+    );
+    scripts.insert(
+        "mf2:check".to_string(),
+        Value::String(format!(
+            "mf2-i18n check-web --config {config_path} --target {}",
+            options.target_name,
+        )),
+    );
+
+    let mut encoded = serde_json::to_string_pretty(&package)?;
+    encoded.push('\n');
+    fs::write(package_path, encoded)?;
+    Ok(())
+}
+
+fn validate_package_script_args(
+    project_root: &Path,
+    options: &InitOptions,
+) -> Result<(), InitCommandError> {
+    validate_script_arg("target", &options.target_name, false)?;
+    validate_script_arg(
+        "config",
+        &package_script_config_path(project_root, &options.config_path),
+        true,
+    )?;
+    Ok(())
+}
+
+fn validate_script_arg(
+    name: &'static str,
+    value: &str,
+    allow_slash: bool,
+) -> Result<(), InitCommandError> {
+    let is_safe = !value.is_empty()
+        && value.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(ch, '_' | '-' | '.')
+                || (allow_slash && ch == '/')
+        });
+    if is_safe {
+        Ok(())
+    } else {
+        Err(InitCommandError::PackageScriptArg {
+            name,
+            value: value.to_string(),
+        })
+    }
+}
+
+fn package_script_config_path(project_root: &Path, config_path: &Path) -> String {
+    let path = if config_path.is_absolute() {
+        config_path
+            .strip_prefix(project_root)
+            .unwrap_or(config_path)
+    } else {
+        config_path
+    };
+    path.to_string_lossy().replace('\\', "/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{InitCommandError, InitOptions, run_init};
+    use crate::command_build_web::{BuildWebOptions, run_build_web};
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir() -> PathBuf {
         let mut path = std::env::temp_dir();
@@ -74,7 +245,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        path.push(format!("mf2_i18n_init_{nanos}"));
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        path.push(format!("mf2_i18n_init_{nanos}_{counter}"));
         fs::create_dir_all(&path).expect("dir");
         path
     }
@@ -94,6 +266,61 @@ mod tests {
         let contents = fs::read_to_string(config_path).expect("read");
         assert!(contents.contains("version = 1"));
         assert!(contents.contains("preset = \"vite\""));
+        assert!(dir.join("locales/en/app.mf2").exists());
+        assert!(dir.join("id_salt.txt").exists());
+        assert!(dir.join("src/generated/mf2/.gitignore").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn adds_package_scripts_when_package_json_exists() {
+        let dir = temp_dir();
+        fs::write(dir.join("package.json"), "{}").expect("package");
+        let config_dir = dir.join("i18n");
+        let config_path = config_dir.join("mf2_i18n.toml");
+        run_init(&InitOptions {
+            config_path,
+            preset: "react".to_string(),
+            source_layout: "single-locale-file".to_string(),
+            target_name: "app".to_string(),
+        })
+        .expect("init");
+
+        let package = fs::read_to_string(dir.join("package.json")).expect("read");
+        assert!(package.contains(
+            "\"mf2:gen\": \"mf2-i18n build-web --config i18n/mf2_i18n.toml --target app\""
+        ));
+        assert!(package.contains(
+            "\"mf2:check\": \"mf2-i18n check-web --config i18n/mf2_i18n.toml --target app\""
+        ));
+        assert!(config_dir.join("locales/en.mf2").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn initialized_project_builds_web_target() {
+        let dir = temp_dir();
+        let config_path = dir.join("mf2_i18n.toml");
+        run_init(&InitOptions {
+            config_path: config_path.clone(),
+            preset: "vite".to_string(),
+            source_layout: "locale-namespace".to_string(),
+            target_name: "web".to_string(),
+        })
+        .expect("init");
+
+        run_build_web(&BuildWebOptions {
+            config_path,
+            target_name: "web".to_string(),
+            out_dir: Some(dir.join("out")),
+            check: false,
+            dto_types: false,
+        })
+        .expect("build-web");
+
+        assert!(dir.join("out/mf2-web-manifest.json").exists());
 
         fs::remove_dir_all(&dir).ok();
     }

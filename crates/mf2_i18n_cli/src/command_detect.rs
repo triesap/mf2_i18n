@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use serde_json::Value;
+
 #[derive(Debug, Clone)]
 pub struct DetectOptions {
     pub cwd: PathBuf,
@@ -13,9 +15,7 @@ pub struct DetectReport {
 
 pub fn run_detect(options: &DetectOptions) -> DetectReport {
     let mut detected_presets = Vec::new();
-    if options.cwd.join("package.json").exists() {
-        detected_presets.push("vanilla".to_string());
-    }
+    detect_package_presets(&options.cwd, &mut detected_presets);
     if [
         "docusaurus.config.js",
         "docusaurus.config.ts",
@@ -26,10 +26,44 @@ pub fn run_detect(options: &DetectOptions) -> DetectReport {
     {
         detected_presets.push("docusaurus".to_string());
     }
+    detected_presets.sort();
+    detected_presets.dedup();
 
     DetectReport {
         config_exists: options.cwd.join("mf2_i18n.toml").exists(),
         detected_presets,
+    }
+}
+
+fn detect_package_presets(cwd: &PathBuf, detected_presets: &mut Vec<String>) {
+    let package_path = cwd.join("package.json");
+    let Ok(contents) = std::fs::read_to_string(package_path) else {
+        return;
+    };
+    let Ok(package) = serde_json::from_str::<Value>(&contents) else {
+        return;
+    };
+
+    let dependencies = ["dependencies", "devDependencies", "peerDependencies"]
+        .into_iter()
+        .filter_map(|field| package.get(field).and_then(Value::as_object))
+        .flat_map(|object| object.keys().map(String::as_str))
+        .collect::<Vec<_>>();
+
+    if dependencies.iter().any(|name| *name == "@docusaurus/core") {
+        detected_presets.push("docusaurus".to_string());
+    }
+    if dependencies.iter().any(|name| *name == "vite") {
+        detected_presets.push("vite".to_string());
+    }
+    if dependencies.iter().any(|name| *name == "react") {
+        detected_presets.push("react".to_string());
+    }
+    if dependencies.iter().any(|name| *name == "svelte") {
+        detected_presets.push("svelte".to_string());
+    }
+    if detected_presets.is_empty() {
+        detected_presets.push("vanilla".to_string());
     }
 }
 
@@ -54,11 +88,15 @@ mod tests {
     #[test]
     fn detects_package_and_docusaurus_projects() {
         let dir = temp_dir();
-        fs::write(dir.join("package.json"), "{}").expect("package");
+        fs::write(
+            dir.join("package.json"),
+            r#"{"dependencies":{"@docusaurus/core":"latest","react":"latest","vite":"latest"}}"#,
+        )
+        .expect("package");
         fs::write(dir.join("docusaurus.config.ts"), "export default {};").expect("config");
 
         let report = run_detect(&DetectOptions { cwd: dir.clone() });
-        assert_eq!(report.detected_presets, ["vanilla", "docusaurus"]);
+        assert_eq!(report.detected_presets, ["docusaurus", "react", "vite"]);
         assert!(!report.config_exists);
 
         fs::remove_dir_all(&dir).ok();
