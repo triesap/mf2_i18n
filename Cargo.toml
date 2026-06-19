@@ -25,7 +25,7 @@ serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "1.0"
 toml = "0.8"
-dto_bindgen = { git = "https://github.com/triesap/dto_bindgen", rev = "4905eded9ca9f76c688ac8d0c8f8579021850590" }
+dto_bindgen = { git = "ssh://git@github.com/triesap/dto_bindgen.git", rev = "7b4f0a5b30bc0811fa0901446f178df558c03924" }
 mf2_i18n_build = { version = "0.1.0", path = "crates/mf2_i18n_build" }
 mf2_i18n_core = { version = "0.1.0", path = "crates/mf2_i18n_core" }
 mf2_i18n_native = { version = "0.1.0", path = "crates/mf2_i18n_native" }
