@@ -101,7 +101,7 @@ fn validate_select(select: &SelectExpr, spec: &MessageSpec, diagnostics: &mut Ve
 fn is_known_formatter(name: &str) -> bool {
     matches!(
         name,
-        "number" | "date" | "time" | "datetime" | "unit" | "currency" | "identity"
+        "number" | "date" | "time" | "datetime" | "unit" | "currency" | "identity" | "slot"
     )
 }
 
@@ -112,6 +112,7 @@ fn formatter_accepts_arg(formatter: &str, arg_type: &ArgType) -> bool {
         "unit" => matches!(arg_type, ArgType::Unit | ArgType::Any),
         "currency" => matches!(arg_type, ArgType::Currency | ArgType::Any),
         "identity" => true,
+        "slot" => matches!(arg_type, ArgType::Any),
         _ => false,
     }
 }

@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use mf2_i18n_core::{
     Args, CatalogChain, DateTimeValue, FormatBackend, LanguageTag, PackCatalog, PackKind,
-    PluralCategory, decode_string_pool, execute, negotiate_lookup, parse_pack_header,
-    parse_section_directory,
+    PluralCategory, RichTextMessage, decode_string_pool, execute, execute_rich_text,
+    negotiate_lookup, parse_pack_header, parse_section_directory,
 };
 use mf2_i18n_std::StdFormatBackend;
 
@@ -241,6 +241,17 @@ impl Runtime {
         self.format_with_backend(locale, key, args, &backend)
     }
 
+    pub fn format_rich_text(
+        &self,
+        locale: &str,
+        key: &str,
+        args: &Args,
+    ) -> RuntimeResult<RichTextMessage> {
+        let backend =
+            StdFormatBackend::new(locale).map_err(|err| RuntimeError::Core(err.to_string()))?;
+        self.format_rich_text_with_backend(locale, key, args, &backend)
+    }
+
     pub fn default_locale(&self) -> &str {
         self.default_locale.normalized()
     }
@@ -285,6 +296,29 @@ impl Runtime {
             .lookup(message_id)
             .ok_or_else(|| RuntimeError::MissingMessage(key.to_string()))?;
         let output = execute(program, args, backend)?;
+        Ok(output)
+    }
+
+    pub fn format_rich_text_with_backend(
+        &self,
+        locale: &str,
+        key: &str,
+        args: &Args,
+        backend: &dyn FormatBackend,
+    ) -> RuntimeResult<RichTextMessage> {
+        let locale_tag = LanguageTag::parse(locale)?;
+        let negotiation = negotiate_lookup(&[locale_tag], &self.supported, &self.default_locale);
+        let selected = negotiation.selected.normalized().to_string();
+        let catalog_chain = self.catalog_chain_for(&selected)?;
+
+        let message_id = self
+            .id_map
+            .get(key)
+            .ok_or_else(|| RuntimeError::MissingMessage(key.to_string()))?;
+        let program = catalog_chain
+            .lookup(message_id)
+            .ok_or_else(|| RuntimeError::MissingMessage(key.to_string()))?;
+        let output = execute_rich_text(program, args, backend)?;
         Ok(output)
     }
 

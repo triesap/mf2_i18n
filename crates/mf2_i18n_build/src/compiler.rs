@@ -65,6 +65,14 @@ impl Compiler {
 
     fn compile_var(&mut self, var: &VarExpr) -> Result<(), CompileError> {
         let aidx = self.arg_index(&var.name);
+        if var
+            .formatter
+            .as_ref()
+            .is_some_and(|formatter| formatter.name == "slot")
+        {
+            self.program.opcodes.push(Opcode::EmitSlot { aidx });
+            return Ok(());
+        }
         self.program.opcodes.push(Opcode::PushArg { aidx });
         if let Some(formatter) = &var.formatter {
             let fid = formatter_id(&formatter.name, var.span.line, var.span.column)?;
@@ -116,7 +124,7 @@ impl Compiler {
         for case in &select.cases {
             let start = self.program.opcodes.len() as u32;
             entries.push(CaseEntry {
-                key: compile_case_key(&mut self.program, &case.key, case.is_default),
+                key: compile_case_key(&mut self.program, &case.key, case.is_default, select.kind),
                 target: start,
             });
             self.compile_message(&case.value)?;
@@ -177,17 +185,39 @@ fn formatter_id(name: &str, line: u32, column: u32) -> Result<FormatterId, Compi
     }
 }
 
-fn compile_case_key(program: &mut BytecodeProgram, key: &AstCaseKey, is_default: bool) -> CaseKey {
+fn compile_case_key(
+    program: &mut BytecodeProgram,
+    key: &AstCaseKey,
+    is_default: bool,
+    select_kind: SelectKind,
+) -> CaseKey {
     if is_default {
         return CaseKey::Other;
     }
     match key {
         AstCaseKey::Other => CaseKey::Other,
         AstCaseKey::Exact(value) => CaseKey::Exact(*value),
+        AstCaseKey::Ident(value) if select_kind == SelectKind::Plural => plural_case_key(value)
+            .unwrap_or_else(|| {
+                let sidx = program.string_pool.push(value.clone());
+                CaseKey::String(sidx)
+            }),
         AstCaseKey::Ident(value) => {
             let sidx = program.string_pool.push(value.clone());
             CaseKey::String(sidx)
         }
+    }
+}
+
+fn plural_case_key(value: &str) -> Option<CaseKey> {
+    match value {
+        "zero" => Some(CaseKey::Category(mf2_i18n_core::PluralCategory::Zero)),
+        "one" => Some(CaseKey::Category(mf2_i18n_core::PluralCategory::One)),
+        "two" => Some(CaseKey::Category(mf2_i18n_core::PluralCategory::Two)),
+        "few" => Some(CaseKey::Category(mf2_i18n_core::PluralCategory::Few)),
+        "many" => Some(CaseKey::Category(mf2_i18n_core::PluralCategory::Many)),
+        "other" => Some(CaseKey::Other),
+        _ => None,
     }
 }
 
@@ -242,6 +272,31 @@ mod tests {
             }
             _ => panic!("expected call formatter"),
         }
+    }
+
+    #[test]
+    fn rich_text_slot_formatter_compiles_to_slot_opcode() {
+        let message = parse_message("Read { $terms :slot } now").expect("parse");
+        let compiled = compile_message(&message).expect("compile");
+
+        assert!(matches!(
+            compiled.program.opcodes[1],
+            mf2_i18n_core::Opcode::EmitSlot { .. }
+        ));
+    }
+
+    #[test]
+    fn rich_text_plural_cases_compile_ident_categories() {
+        let message = parse_message(
+            "{ $count :plural -> [one] {{ $single :slot }} *[other] {{ $many :slot }}}",
+        )
+        .expect("parse");
+        let compiled = compile_message(&message).expect("compile");
+
+        assert!(matches!(
+            compiled.program.case_tables[0].entries[0].key,
+            mf2_i18n_core::CaseKey::Category(mf2_i18n_core::PluralCategory::One)
+        ));
     }
 
     #[test]

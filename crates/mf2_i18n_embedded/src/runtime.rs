@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use mf2_i18n_core::{
     Args, Catalog, CoreError, CoreResult, DateTimeValue, FormatBackend, LanguageTag, PackCatalog,
-    PluralCategory, execute, negotiate_lookup,
+    PluralCategory, RichTextMessage, execute, execute_rich_text, negotiate_lookup,
 };
 
 pub struct EmbeddedPack<'a> {
@@ -179,6 +179,16 @@ impl EmbeddedRuntime {
         self.format_with_backend(locale, key, args, &backend)
     }
 
+    pub fn format_rich_text(
+        &self,
+        locale: &str,
+        key: &str,
+        args: &Args,
+    ) -> CoreResult<RichTextMessage> {
+        let backend = UnsupportedFormatBackend;
+        self.format_rich_text_with_backend(locale, key, args, &backend)
+    }
+
     pub fn default_locale(&self) -> &str {
         self.default_locale.normalized()
     }
@@ -211,6 +221,32 @@ impl EmbeddedRuntime {
             .lookup(message_id)
             .ok_or(CoreError::InvalidInput("missing message"))?;
         execute(program, args, backend)
+    }
+
+    pub fn format_rich_text_with_backend(
+        &self,
+        locale: &str,
+        key: &str,
+        args: &Args,
+        backend: &dyn FormatBackend,
+    ) -> CoreResult<RichTextMessage> {
+        let locale_tag = LanguageTag::parse(locale)?;
+        let negotiation = negotiate_lookup(&[locale_tag], &self.supported, &self.default_locale);
+        let selected = negotiation.selected.normalized();
+
+        let catalog = self
+            .packs
+            .get(selected)
+            .ok_or(CoreError::InvalidInput("missing locale"))?;
+        let message_id = self
+            .id_map
+            .get(key)
+            .copied()
+            .ok_or(CoreError::InvalidInput("missing message"))?;
+        let program = catalog
+            .lookup(message_id)
+            .ok_or(CoreError::InvalidInput("missing message"))?;
+        execute_rich_text(program, args, backend)
     }
 }
 

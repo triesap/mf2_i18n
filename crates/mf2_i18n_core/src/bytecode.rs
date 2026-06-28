@@ -19,6 +19,9 @@ pub enum Opcode {
     EmitText {
         sidx: StringIndex,
     },
+    EmitSlot {
+        aidx: ArgIndex,
+    },
     EmitStack,
     PushStr {
         sidx: StringIndex,

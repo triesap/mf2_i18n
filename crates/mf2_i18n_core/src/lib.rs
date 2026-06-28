@@ -28,7 +28,7 @@ pub use error::{CoreError, CoreResult};
 pub use format_backend::{
     FormatBackend, FormatterId, FormatterOption, FormatterOptionValue, PluralCategory, format_value,
 };
-pub use interpreter::execute;
+pub use interpreter::{execute, execute_rich_text};
 pub use language_tag::LanguageTag;
 pub use negotiation::{
     NegotiationResult, NegotiationTrace, negotiate_lookup, negotiate_lookup_with_trace,

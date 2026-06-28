@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
-use mf2_i18n_core::{Args, FormatBackend, LanguageTag, MessageId, negotiate_lookup};
+use mf2_i18n_core::{
+    Args, FormatBackend, LanguageTag, MessageId, RichTextMessage, negotiate_lookup,
+};
 use mf2_i18n_embedded::{EmbeddedPack, EmbeddedRuntime};
 use mf2_i18n_runtime::{IdMap, Runtime, parse_sha256_literal};
 use mf2_i18n_std::StdFormatBackend;
@@ -209,9 +211,24 @@ impl NativeLocalizer {
         self.format_locale(&locale, key, args)
     }
 
+    pub fn format_rich_text(&self, key: &str, args: &Args) -> NativeResult<RichTextMessage> {
+        let locale = self.locale();
+        self.format_rich_text_locale(&locale, key, args)
+    }
+
     pub fn format_locale(&self, locale: &str, key: &str, args: &Args) -> NativeResult<String> {
         let backend = self.format_backend(locale)?;
         self.format_locale_with_backend(locale, key, args, backend.as_ref())
+    }
+
+    pub fn format_rich_text_locale(
+        &self,
+        locale: &str,
+        key: &str,
+        args: &Args,
+    ) -> NativeResult<RichTextMessage> {
+        let backend = self.format_backend(locale)?;
+        self.format_rich_text_locale_with_backend(locale, key, args, backend.as_ref())
     }
 
     pub fn format_with_backend(
@@ -222,6 +239,16 @@ impl NativeLocalizer {
     ) -> NativeResult<String> {
         let locale = self.locale();
         self.format_locale_with_backend(&locale, key, args, backend)
+    }
+
+    pub fn format_rich_text_with_backend(
+        &self,
+        key: &str,
+        args: &Args,
+        backend: &dyn FormatBackend,
+    ) -> NativeResult<RichTextMessage> {
+        let locale = self.locale();
+        self.format_rich_text_locale_with_backend(&locale, key, args, backend)
     }
 
     pub fn format_locale_with_backend(
@@ -237,6 +264,24 @@ impl NativeLocalizer {
             }
             Some(NativeRuntime::Filesystem(runtime)) => {
                 Ok(runtime.format_with_backend(locale, key, args, backend)?)
+            }
+            None => Err(NativeError::NotInitialized),
+        }
+    }
+
+    pub fn format_rich_text_locale_with_backend(
+        &self,
+        locale: &str,
+        key: &str,
+        args: &Args,
+        backend: &dyn FormatBackend,
+    ) -> NativeResult<RichTextMessage> {
+        match self.runtime.as_ref() {
+            Some(NativeRuntime::Embedded(runtime)) => {
+                Ok(runtime.format_rich_text_with_backend(locale, key, args, backend)?)
+            }
+            Some(NativeRuntime::Filesystem(runtime)) => {
+                Ok(runtime.format_rich_text_with_backend(locale, key, args, backend)?)
             }
             None => Err(NativeError::NotInitialized),
         }
@@ -323,7 +368,7 @@ mod tests {
     use mf2_i18n_build::compiler::compile_message;
     use mf2_i18n_build::pack_encode::{PackBuildInput, encode_pack};
     use mf2_i18n_build::parser::parse_message;
-    use mf2_i18n_core::{Args, CoreError, MessageId, PackKind, Value};
+    use mf2_i18n_core::{Args, CoreError, MessageId, PackKind, RichTextPart, Value};
     use mf2_i18n_embedded::EmbeddedPack;
     use mf2_i18n_runtime::IdMap;
     use mf2_i18n_std::StdFormatError;
@@ -389,6 +434,144 @@ mod tests {
         assert_eq!(localizer.tr_or_key("home.title"), "hi");
         assert_eq!(localizer.default_locale(), "en");
         assert_eq!(localizer.supported_locales(), vec!["en".to_string()]);
+    }
+
+    #[test]
+    fn rich_text_formats_localized_slot_order_from_embedded_artifacts() {
+        let id_map_json = br#"{"home.cta": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let en_pack = build_pack_bytes(
+            id_map_hash,
+            "en",
+            "Use { $ios :slot } or { $android :slot } and { $ios :slot }.",
+        );
+        let fr_pack = build_pack_bytes(
+            id_map_hash,
+            "fr",
+            "Utilisez { $android :slot }, puis { $ios :slot }.",
+        );
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [
+            EmbeddedPack {
+                locale: "en",
+                bytes: &en_pack,
+            },
+            EmbeddedPack {
+                locale: "fr",
+                bytes: &fr_pack,
+            },
+        ];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+        let mut args = Args::new();
+        args.insert("ios", Value::Any(Box::new(())));
+        args.insert("android", Value::Any(Box::new(())));
+
+        let default_message = localizer
+            .format_rich_text("home.cta", &args)
+            .expect("default rich text");
+        let french_message = localizer
+            .format_rich_text_locale("fr", "home.cta", &args)
+            .expect("fr rich text");
+
+        assert_eq!(
+            default_message.into_parts(),
+            vec![
+                RichTextPart::text("Use "),
+                RichTextPart::slot("ios"),
+                RichTextPart::text(" or "),
+                RichTextPart::slot("android"),
+                RichTextPart::text(" and "),
+                RichTextPart::slot("ios"),
+                RichTextPart::text("."),
+            ]
+        );
+        assert_eq!(
+            french_message.into_parts(),
+            vec![
+                RichTextPart::text("Utilisez "),
+                RichTextPart::slot("android"),
+                RichTextPart::text(", puis "),
+                RichTextPart::slot("ios"),
+                RichTextPart::text("."),
+            ]
+        );
+        assert!(matches!(
+            localizer.tr("home.cta"),
+            Err(crate::NativeError::Core(CoreError::Unsupported(
+                "slot formatting requires rich text"
+            )))
+        ));
+    }
+
+    #[test]
+    fn rich_text_formats_slots_inside_plural_cases() {
+        let id_map_json = br#"{"home.count": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let pack = build_pack_bytes(
+            id_map_hash,
+            "en",
+            "{ $count :plural -> [one] {Open { $single :slot }} *[other] {Open { $many :slot }}}",
+        );
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [EmbeddedPack {
+            locale: "en",
+            bytes: &pack,
+        }];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+        let mut args = Args::new();
+        args.insert("count", Value::Num(1.0));
+        args.insert("single", Value::Any(Box::new(())));
+        args.insert("many", Value::Any(Box::new(())));
+
+        let message = localizer
+            .format_rich_text("home.count", &args)
+            .expect("rich text");
+
+        assert_eq!(
+            message.into_parts(),
+            vec![RichTextPart::text("Open "), RichTextPart::slot("single"),]
+        );
+    }
+
+    #[test]
+    fn rich_text_reports_missing_slot_args() {
+        let id_map_json = br#"{"home.cta": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let pack = build_pack_bytes(id_map_hash, "en", "Use { $ios :slot }.");
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [EmbeddedPack {
+            locale: "en",
+            bytes: &pack,
+        }];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+
+        assert!(matches!(
+            localizer.format_rich_text("home.cta", &Args::new()),
+            Err(crate::NativeError::Core(CoreError::InvalidInput(
+                "missing argument"
+            )))
+        ));
     }
 
     #[test]

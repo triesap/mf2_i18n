@@ -232,6 +232,9 @@ fn decode_message(
                 rel: read_i32(input, &mut cursor)?,
             },
             11 => crate::Opcode::End,
+            12 => crate::Opcode::EmitSlot {
+                aidx: read_u32(input, &mut cursor)?,
+            },
             _ => return Err(CoreError::InvalidInput("unknown opcode tag")),
         };
         opcodes.push(opcode);

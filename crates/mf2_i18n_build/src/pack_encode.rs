@@ -253,6 +253,10 @@ fn encode_opcode(bytes: &mut Vec<u8>, opcode: Opcode) {
             bytes.push(0);
             bytes.extend_from_slice(&sidx.to_le_bytes());
         }
+        Opcode::EmitSlot { aidx } => {
+            bytes.push(12);
+            bytes.extend_from_slice(&aidx.to_le_bytes());
+        }
         Opcode::EmitStack => bytes.push(1),
         Opcode::PushStr { sidx } => {
             bytes.push(2);
@@ -410,10 +414,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn encodes_and_decodes_pack() {
+    fn rich_text_encodes_and_decodes_slot_opcode() {
         let mut program = BytecodeProgram::new();
         let sidx = program.string_pool.push("hello");
+        let aidx = program.push_arg_name("link");
         program.opcodes.push(Opcode::EmitText { sidx });
+        program.opcodes.push(Opcode::EmitSlot { aidx });
         program.opcodes.push(Opcode::End);
 
         let mut messages = BTreeMap::new();
@@ -430,7 +436,8 @@ mod tests {
 
         let catalog = PackCatalog::decode(&bytes, &[7u8; 32]).expect("decode");
         let program = catalog.lookup(MessageId::new(1)).expect("program");
-        assert_eq!(program.opcodes.len(), 2);
+        assert_eq!(program.opcodes.len(), 3);
+        assert!(matches!(program.opcodes[1], Opcode::EmitSlot { .. }));
         let mut found = false;
         for idx in 0..program.string_pool.len() {
             if program.string_pool.get(idx as u32) == Some("hello") {

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use crate::{
     Args, BytecodeProgram, CaseKey, CaseTable, CoreError, CoreResult, FormatBackend, FormatterId,
-    FormatterOption, Opcode, PluralRuleset, Value, format_value,
+    FormatterOption, Opcode, PluralRuleset, RichTextMessage, Value, format_value,
 };
 
 pub fn execute(
@@ -25,12 +25,122 @@ pub fn execute(
                     .ok_or(CoreError::InvalidInput("string index out of bounds"))?;
                 output.push_str(text);
             }
+            Opcode::EmitSlot { .. } => {
+                return Err(CoreError::Unsupported("slot formatting requires rich text"));
+            }
             Opcode::EmitStack => {
                 let value = stack
                     .pop()
                     .ok_or(CoreError::InvalidInput("stack underflow"))?;
                 let rendered = format_value(backend, FormatterId::Identity, &value, &[])?;
                 output.push_str(&rendered);
+            }
+            Opcode::PushStr { sidx } => {
+                let text = program
+                    .string_pool
+                    .get(sidx)
+                    .ok_or(CoreError::InvalidInput("string index out of bounds"))?;
+                stack.push(Value::Str(String::from(text)));
+            }
+            Opcode::PushNum { nidx } => {
+                let number = program
+                    .number_pool
+                    .get(nidx as usize)
+                    .ok_or(CoreError::InvalidInput("number index out of bounds"))?;
+                stack.push(Value::Num(*number));
+            }
+            Opcode::PushArg { aidx } => {
+                let name = program
+                    .arg_name(aidx)
+                    .ok_or(CoreError::InvalidInput("arg index out of bounds"))?;
+                let value = args.require(name)?;
+                stack.push(clone_value(value)?);
+            }
+            Opcode::Dup => {
+                let value = stack
+                    .last()
+                    .ok_or(CoreError::InvalidInput("stack underflow"))?;
+                stack.push(clone_value(value)?);
+            }
+            Opcode::Pop => {
+                let _ = stack
+                    .pop()
+                    .ok_or(CoreError::InvalidInput("stack underflow"))?;
+            }
+            Opcode::CallFmt {
+                fid,
+                opt_start,
+                opt_count,
+            } => {
+                let value = stack
+                    .pop()
+                    .ok_or(CoreError::InvalidInput("stack underflow"))?;
+                let options = formatter_options(program, opt_start, opt_count)?;
+                let rendered = format_value(backend, fid, &value, options)?;
+                stack.push(Value::Str(rendered));
+            }
+            Opcode::Select { aidx, table } => {
+                let target = select_case(program, args, aidx, table)?;
+                pc = target;
+                continue;
+            }
+            Opcode::SelectPlural {
+                aidx,
+                ruleset,
+                table,
+            } => {
+                let target = select_plural_case(program, args, backend, aidx, ruleset, table)?;
+                pc = target;
+                continue;
+            }
+            Opcode::Jump { rel } => {
+                let next = pc as i32 + rel;
+                if next < 0 {
+                    return Err(CoreError::InvalidInput("jump underflow"));
+                }
+                pc = next as usize;
+                continue;
+            }
+            Opcode::End => break,
+        }
+        pc += 1;
+    }
+
+    Ok(output)
+}
+
+pub fn execute_rich_text(
+    program: &BytecodeProgram,
+    args: &Args,
+    backend: &dyn FormatBackend,
+) -> CoreResult<RichTextMessage> {
+    let mut stack: Vec<Value> = Vec::new();
+    let mut output = RichTextMessage::default();
+    let mut pc: usize = 0;
+
+    while pc < program.opcodes.len() {
+        let opcode = program.opcodes[pc];
+        match opcode {
+            Opcode::EmitText { sidx } => {
+                let text = program
+                    .string_pool
+                    .get(sidx)
+                    .ok_or(CoreError::InvalidInput("string index out of bounds"))?;
+                output.push_text(text);
+            }
+            Opcode::EmitSlot { aidx } => {
+                let name = program
+                    .arg_name(aidx)
+                    .ok_or(CoreError::InvalidInput("arg index out of bounds"))?;
+                args.require(name)?;
+                output.push_slot(name);
+            }
+            Opcode::EmitStack => {
+                let value = stack
+                    .pop()
+                    .ok_or(CoreError::InvalidInput("stack underflow"))?;
+                let rendered = format_value(backend, FormatterId::Identity, &value, &[])?;
+                output.push_text(rendered);
             }
             Opcode::PushStr { sidx } => {
                 let text = program
@@ -259,10 +369,10 @@ mod tests {
     use alloc::string::{String, ToString};
     use alloc::vec;
 
-    use super::execute;
+    use super::{execute, execute_rich_text};
     use crate::{
         Args, BytecodeProgram, DateTimeValue, FormatBackend, FormatterId, FormatterOption,
-        FormatterOptionValue, Opcode, PluralCategory, Value,
+        FormatterOptionValue, Opcode, PluralCategory, RichTextPart, Value,
     };
 
     struct TestBackend;
@@ -360,6 +470,66 @@ mod tests {
 
         let out = execute(&program, &args, &backend).expect("exec ok");
         assert_eq!(out, "Hello Nova");
+    }
+
+    #[test]
+    fn rich_text_preserves_text_and_slot_order() {
+        let backend = TestBackend;
+        let mut program = BytecodeProgram::new();
+        let read = program.string_pool.push("Read ");
+        let before = program.string_pool.push(" before ");
+        let terms = program.push_arg_name("terms");
+        let signup = program.push_arg_name("signup");
+        program.opcodes = vec![
+            Opcode::EmitText { sidx: read },
+            Opcode::EmitSlot { aidx: terms },
+            Opcode::EmitText { sidx: before },
+            Opcode::EmitSlot { aidx: signup },
+            Opcode::End,
+        ];
+
+        let mut args = Args::new();
+        args.insert("terms", Value::Any(alloc::boxed::Box::new(())));
+        args.insert("signup", Value::Any(alloc::boxed::Box::new(())));
+
+        let out = execute_rich_text(&program, &args, &backend).expect("rich text");
+
+        assert_eq!(
+            out.into_parts(),
+            vec![
+                RichTextPart::text("Read "),
+                RichTextPart::slot("terms"),
+                RichTextPart::text(" before "),
+                RichTextPart::slot("signup"),
+            ]
+        );
+    }
+
+    #[test]
+    fn rich_text_requires_declared_slot_args() {
+        let backend = TestBackend;
+        let mut program = BytecodeProgram::new();
+        let terms = program.push_arg_name("terms");
+        program.opcodes = vec![Opcode::EmitSlot { aidx: terms }, Opcode::End];
+
+        let err = execute_rich_text(&program, &Args::new(), &backend).expect_err("missing slot");
+
+        assert_eq!(err, crate::CoreError::InvalidInput("missing argument"));
+    }
+
+    #[test]
+    fn rich_text_plain_execution_rejects_slot_messages() {
+        let backend = TestBackend;
+        let mut program = BytecodeProgram::new();
+        let terms = program.push_arg_name("terms");
+        program.opcodes = vec![Opcode::EmitSlot { aidx: terms }, Opcode::End];
+
+        let err = execute(&program, &Args::new(), &backend).expect_err("slot");
+
+        assert_eq!(
+            err,
+            crate::CoreError::Unsupported("slot formatting requires rich text")
+        );
     }
 
     #[test]
