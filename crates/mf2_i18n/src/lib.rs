@@ -31,9 +31,9 @@ pub use mf2_i18n_build::{
 };
 pub use mf2_i18n_core::{
     ArgType, Args, CoreError, CoreResult, DateTimeValue, FormatBackend, FormatterId,
-    FormatterOption, FormatterOptionValue, LanguageTag, MessageId, NegotiationResult,
-    NegotiationTrace, PackKind, PluralCategory, RichTextMessage, RichTextPart, Value,
-    negotiate_lookup, negotiate_lookup_with_trace,
+    FormatterOption, FormatterOptionValue, I18nMessageKey, LanguageTag, MessageId,
+    NegotiationResult, NegotiationTrace, PackKind, PluralCategory, RichTextMessage, RichTextPart,
+    Value, negotiate_lookup, negotiate_lookup_with_trace,
 };
 #[cfg(feature = "embedded")]
 pub use mf2_i18n_embedded::{EmbeddedPack, EmbeddedRuntime};

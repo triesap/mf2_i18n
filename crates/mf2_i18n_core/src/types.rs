@@ -3,6 +3,10 @@ use core::fmt;
 
 use crate::{CoreError, CoreResult};
 
+pub trait I18nMessageKey: Copy + Send + Sync + 'static {
+    fn id(self) -> &'static str;
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Key(String);
 
@@ -67,8 +71,21 @@ impl From<MessageId> for u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Key, MessageId};
+    use super::{I18nMessageKey, Key, MessageId};
     use alloc::string::ToString;
+
+    #[derive(Clone, Copy)]
+    enum TestMessageKey {
+        HomeTitle,
+    }
+
+    impl I18nMessageKey for TestMessageKey {
+        fn id(self) -> &'static str {
+            match self {
+                Self::HomeTitle => "home.title",
+            }
+        }
+    }
 
     #[test]
     fn key_rejects_empty() {
@@ -91,5 +108,10 @@ mod tests {
         assert_eq!(raw, 42);
         let id = MessageId::from(7);
         assert_eq!(id.get(), 7);
+    }
+
+    #[test]
+    fn message_key_trait_exposes_static_ids() {
+        assert_eq!(TestMessageKey::HomeTitle.id(), "home.title");
     }
 }

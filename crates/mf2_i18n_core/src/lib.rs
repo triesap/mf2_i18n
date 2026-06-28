@@ -39,4 +39,4 @@ pub use pack_decode::{
     decode_dense_index, decode_sparse_index, decode_string_pool, read_bytecode_at,
 };
 pub use rich_text::{RichTextMessage, RichTextPart};
-pub use types::{Key, MessageId};
+pub use types::{I18nMessageKey, Key, MessageId};

@@ -15,4 +15,6 @@ categories = ["internationalization", "text-processing"]
 name = "mf2_i18n_leptos"
 
 [dependencies]
-mf2_i18n_runtime = { workspace = true }
+leptos = { workspace = true }
+mf2_i18n_core = { workspace = true }
+mf2_i18n_native = { workspace = true }
