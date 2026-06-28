@@ -1,15 +1,9 @@
-mod generated {
-    mf2_i18n::define_i18n_module! {
-        init_policy: fallback_to_keys,
-        default_locale: "en",
-        id_map_json: br#"{}"#,
-        id_map_hash: b"sha256:00",
-        packs: [("en", b"")],
-    }
-}
+include!(concat!(env!("OUT_DIR"), "/app_i18n/generated_module.rs"));
 
 pub fn smoke() -> String {
-    let _default_locale = env!("MF2_MIXED_RUNTIME_BUILD_DEFAULT_LOCALE");
+    assert_eq!(env!("MF2_MIXED_RUNTIME_BUILD_DEFAULT_LOCALE"), DEFAULT_LOCALE);
     let _runtime: Option<&mf2_i18n::NativeRuntime> = None;
-    generated::locale()
+    let mut args = mf2_i18n::Args::new();
+    args.insert("name", mf2_i18n::Value::Str("Nova".to_string()));
+    t_with_args_or_key(MessageKey::CommonHomeTitle, &args)
 }

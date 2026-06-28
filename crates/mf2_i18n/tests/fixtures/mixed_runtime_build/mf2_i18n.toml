@@ -1,0 +1,4 @@
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"

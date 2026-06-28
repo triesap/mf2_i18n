@@ -491,6 +491,7 @@ pub fn build_native_module(
         render_generated_module(
             runtime_output.default_locale(),
             runtime_output.supported_locales(),
+            &generated_message_keys,
             options.artifact_dir_name(),
             options.module_macro_path(),
         ),
@@ -600,6 +601,7 @@ fn compile_catalog_pack(
 fn render_generated_module(
     default_locale: &str,
     supported_locales: &[String],
+    generated_message_keys: &[GeneratedMessageKey],
     artifact_dir_name: &str,
     module_macro_path: &str,
 ) -> String {
@@ -612,9 +614,29 @@ fn render_generated_module(
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let supported_locale_values = supported_locales
+        .iter()
+        .map(|locale| format!("{locale:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let key_variants = generated_message_keys
+        .iter()
+        .map(|key| format!("    {},", key.variant))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let all_key_values = generated_message_keys
+        .iter()
+        .map(|key| format!("        Self::{},", key.variant))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let key_id_matches = generated_message_keys
+        .iter()
+        .map(|key| format!("            Self::{} => {:?},", key.variant, key.id))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     format!(
-        "mod generated {{\n    {module_macro_path} {{\n        init_policy: strict,\n        default_locale: {default_locale:?},\n        id_map_json: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{ID_MAP_JSON_FILE}\")),\n        id_map_hash: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{ID_MAP_HASH_FILE}\")),\n        packs: [\n{packs_source}\n        ],\n    }}\n}}\n"
+        "mod generated {{\n    {module_macro_path} {{\n        init_policy: strict,\n        default_locale: {default_locale:?},\n        id_map_json: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{ID_MAP_JSON_FILE}\")),\n        id_map_hash: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{ID_MAP_HASH_FILE}\")),\n        packs: [\n{packs_source}\n        ],\n    }}\n}}\n\n#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]\npub enum MessageKey {{\n{key_variants}\n}}\n\nimpl MessageKey {{\n    pub const ALL: &'static [Self] = &[\n{all_key_values}\n    ];\n\n    pub const fn id(self) -> &'static str {{\n        match self {{\n{key_id_matches}\n        }}\n    }}\n}}\n\nimpl ::core::fmt::Display for MessageKey {{\n    fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {{\n        formatter.write_str(self.id())\n    }}\n}}\n\npub const DEFAULT_LOCALE: &str = {default_locale:?};\npub const SUPPORTED_LOCALES: &[&str] = &[{supported_locale_values}];\npub const DEFAULT_CATALOG_KEYS: &[MessageKey] = MessageKey::ALL;\n\npub fn localizer() -> &'static mf2_i18n::NativeLocalizer {{\n    generated::localizer()\n}}\n\npub fn set_preferred_locales(preferred_locales: &[&str]) -> mf2_i18n::NativeResult<String> {{\n    generated::set_preferred_locales(preferred_locales)\n}}\n\npub fn set_locale(locale: &str) -> mf2_i18n::NativeResult<String> {{\n    generated::set_locale(locale)\n}}\n\npub fn negotiate_locale(preferred_locales: &[&str]) -> mf2_i18n::NativeResult<String> {{\n    generated::negotiate_locale(preferred_locales)\n}}\n\npub fn locale() -> String {{\n    generated::locale()\n}}\n\npub fn try_t(key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    generated::tr(key.id())\n}}\n\npub fn t(key: MessageKey) -> String {{\n    try_t(key).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_or_key(key: MessageKey) -> String {{\n    generated::tr_or_key(key.id())\n}}\n\npub fn try_t_locale(locale: &str, key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_locale(locale, key.id())\n}}\n\npub fn t_locale(locale: &str, key: MessageKey) -> String {{\n    try_t_locale(locale, key).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_locale_or_key(locale: &str, key: MessageKey) -> String {{\n    generated::tr_locale_or_key(locale, key.id())\n}}\n\npub fn try_t_with_args(key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_with_args(key.id(), args)\n}}\n\npub fn t_with_args(key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    try_t_with_args(key, args).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_with_args_or_key(key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    generated::tr_with_args_or_key(key.id(), args)\n}}\n\npub fn try_t_with_args_locale(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_with_args_locale(locale, key.id(), args)\n}}\n\npub fn t_with_args_locale(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    try_t_with_args_locale(locale, key, args).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_with_args_locale_or_key(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    generated::tr_with_args_locale_or_key(locale, key.id(), args)\n}}\n"
     )
 }
 
@@ -823,6 +845,13 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
             fs::read_to_string(output.generated_module_path()).expect("generated module");
         assert!(generated_module.contains("mf2_i18n::define_i18n_module!"));
         assert!(generated_module.contains("/app_i18n/packs/en.mf2pack"));
+        assert!(generated_module.contains("pub enum MessageKey"));
+        assert!(generated_module.contains("CommonHomeTitle"));
+        assert!(generated_module.contains("pub const DEFAULT_LOCALE: &str = \"en\""));
+        assert!(generated_module.contains("pub const SUPPORTED_LOCALES: &[&str]"));
+        assert!(generated_module.contains("pub fn try_t(key: MessageKey)"));
+        assert!(generated_module.contains("pub fn t_or_key(key: MessageKey)"));
+        assert!(generated_module.contains("pub fn try_t_with_args("));
 
         let generated_catalog =
             fs::read_to_string(output.generated_catalog_path()).expect("generated catalog");
