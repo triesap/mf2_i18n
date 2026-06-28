@@ -161,6 +161,23 @@ impl I18nContext {
             .tr_with_args_locale_or_key(&locale, key.id(), args)
     }
 
+    pub fn try_rich_text_with_args<K>(&self, key: K, args: &Args) -> NativeResult<RichTextMessage>
+    where
+        K: I18nMessageKey,
+    {
+        let locale = self.locale();
+        self.localizer
+            .format_rich_text_locale(&locale, key.id(), args)
+    }
+
+    pub fn rich_text_with_args<K>(&self, key: K, args: &Args) -> RichTextMessage
+    where
+        K: I18nMessageKey,
+    {
+        self.try_rich_text_with_args(key, args)
+            .expect("mf2_i18n leptos rich text formatting failed")
+    }
+
     pub fn try_text_signal<K>(
         &self,
         key: K,

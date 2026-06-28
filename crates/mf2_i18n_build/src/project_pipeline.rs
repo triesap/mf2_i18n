@@ -778,16 +778,14 @@ pub fn build_leptos_target(
         "{}{GENERATED_LEPTOS_FILE_SUFFIX}",
         leptos_target.module_name
     ));
-    fs::write(
-        &generated_module_path,
-        render_generated_leptos_module(
-            leptos_target,
-            native_target,
-            document_title_variant.as_deref(),
-            &generated_keys,
-            native_output.default_message_metadata(),
-        ),
+    let generated_module = render_generated_leptos_module(
+        leptos_target,
+        native_target,
+        document_title_variant.as_deref(),
+        &generated_keys,
+        native_output.default_message_metadata(),
     )?;
+    fs::write(&generated_module_path, generated_module)?;
 
     Ok(LeptosTargetBuildOutput {
         out_dir,
@@ -860,19 +858,19 @@ fn render_generated_leptos_module(
     document_title_variant: Option<&str>,
     generated_message_keys: &[GeneratedMessageKey],
     message_metadata: &[MessageMetadata],
-) -> String {
+) -> Result<String, NativeModuleBuildError> {
     let native_module_path = format!("{}/{}", native_target.module_name, GENERATED_MODULE_FILE);
     let document_title_key = document_title_variant
         .map(|variant| format!("Some(MessageKey::{variant})"))
         .unwrap_or_else(|| "None".to_string());
     let document_sync_source =
         render_generated_leptos_document_sync(document_title_variant, leptos_target.sync_html_lang);
-    let helpers_source = render_generated_leptos_helpers(generated_message_keys, message_metadata);
-    format!(
+    let helpers_source = render_generated_leptos_helpers(generated_message_keys, message_metadata)?;
+    Ok(format!(
         "include!({native_module_path:?});\n\npub const LEPTOS_MODULE_NAME: &str = {:?};\npub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = {document_title_key};\npub const LEPTOS_SYNC_HTML_LANG: bool = {};\n\npub fn leptos_document_title_key() -> Option<MessageKey> {{\n    LEPTOS_DOCUMENT_TITLE_KEY\n}}\n\npub fn leptos_sync_html_lang() -> bool {{\n    LEPTOS_SYNC_HTML_LANG\n}}\n\npub fn try_text(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    context.try_text(key)\n}}\n\npub fn text(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> String {{\n    context.text(key)\n}}\n\npub fn text_or_key(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> String {{\n    context.text_or_key(key)\n}}\n\npub fn try_text_with_args(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    context.try_text_with_args(key, args)\n}}\n\npub fn text_with_args(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    context.text_with_args(key, args)\n}}\n\npub fn text_with_args_or_key(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    context.text_with_args_or_key(key, args)\n}}\n\npub fn try_text_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> mf2_i18n::NativeResult<String> + Clone + 'static {{\n    context.try_text_signal(key)\n}}\n\npub fn text_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> String + Clone + 'static {{\n    context.text_signal(key)\n}}\n\npub fn text_or_key_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> String + Clone + 'static {{\n    context.text_or_key_signal(key)\n}}\n",
         leptos_target.module_name, leptos_target.sync_html_lang
     ) + &document_sync_source
-        + &helpers_source
+        + &helpers_source)
 }
 
 fn render_generated_leptos_document_sync(
@@ -905,21 +903,29 @@ fn render_generated_leptos_document_sync(
 fn render_generated_leptos_helpers(
     generated_message_keys: &[GeneratedMessageKey],
     message_metadata: &[MessageMetadata],
-) -> String {
+) -> Result<String, NativeModuleBuildError> {
     let metadata_by_id = message_metadata
         .iter()
         .map(|metadata| (metadata.id.as_str(), metadata))
         .collect::<BTreeMap<_, _>>();
-    generated_message_keys
-        .iter()
-        .map(|key| {
-            let args = metadata_by_id
-                .get(key.id.as_str())
-                .map(|metadata| metadata.args.as_slice())
-                .unwrap_or_default();
-            render_generated_leptos_typed_helpers(key, args)
-        })
-        .collect::<String>()
+    let mut output = String::new();
+    for key in generated_message_keys {
+        let metadata = metadata_by_id.get(key.id.as_str()).copied();
+        let args = metadata
+            .map(|metadata| metadata.args.as_slice())
+            .unwrap_or_default();
+        output.push_str(&render_generated_leptos_typed_helpers(key, args));
+        if let Some(metadata) = metadata
+            && metadata.needs_rich_text()
+        {
+            output.push_str(&render_generated_leptos_rich_helpers(
+                key,
+                args,
+                &metadata.rich_slots,
+            )?);
+        }
+    }
+    Ok(output)
 }
 
 fn render_generated_leptos_typed_helpers(key: &GeneratedMessageKey, args: &[MessageArg]) -> String {
@@ -935,6 +941,81 @@ fn render_generated_leptos_typed_helpers(key: &GeneratedMessageKey, args: &[Mess
     format!(
         "\npub fn try_text_{suffix}(context: &mf2_i18n::leptos::I18nContext, args: &{struct_name}) -> mf2_i18n::NativeResult<String> {{\n    try_text_with_args(context, MessageKey::{variant}, args.as_args())\n}}\n\npub fn text_{suffix}(context: &mf2_i18n::leptos::I18nContext, args: &{struct_name}) -> String {{\n    text_with_args(context, MessageKey::{variant}, args.as_args())\n}}\n\npub fn text_{suffix}_or_key(context: &mf2_i18n::leptos::I18nContext, args: &{struct_name}) -> String {{\n    text_with_args_or_key(context, MessageKey::{variant}, args.as_args())\n}}\n\npub fn try_text_{suffix}_signal<F>(context: &mf2_i18n::leptos::I18nContext, args: F) -> impl Fn() -> mf2_i18n::NativeResult<String> + Clone + 'static\nwhere\n    F: Fn() -> {struct_name} + Clone + 'static,\n{{\n    let context = context.clone();\n    move || {{\n        let args = args();\n        context.try_text_with_args(MessageKey::{variant}, args.as_args())\n    }}\n}}\n\npub fn text_{suffix}_signal<F>(context: &mf2_i18n::leptos::I18nContext, args: F) -> impl Fn() -> String + Clone + 'static\nwhere\n    F: Fn() -> {struct_name} + Clone + 'static,\n{{\n    let context = context.clone();\n    move || {{\n        let args = args();\n        context.text_with_args(MessageKey::{variant}, args.as_args())\n    }}\n}}\n\npub fn text_{suffix}_or_key_signal<F>(context: &mf2_i18n::leptos::I18nContext, args: F) -> impl Fn() -> String + Clone + 'static\nwhere\n    F: Fn() -> {struct_name} + Clone + 'static,\n{{\n    let context = context.clone();\n    move || {{\n        let args = args();\n        context.text_with_args_or_key(MessageKey::{variant}, args.as_args())\n    }}\n}}\n"
     )
+}
+
+fn render_generated_leptos_rich_helpers(
+    key: &GeneratedMessageKey,
+    args: &[MessageArg],
+    rich_slots: &[String],
+) -> Result<String, NativeModuleBuildError> {
+    let suffix = variant_function_suffix(&key.variant);
+    let variant = &key.variant;
+    let struct_name = generated_rich_args_struct_name(key);
+    let rich_slot_names = rich_slots
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let mut used = BTreeMap::<String, String>::new();
+    let mut params = Vec::new();
+    let mut slot_fields = Vec::new();
+
+    for arg in args
+        .iter()
+        .filter(|arg| !rich_slot_names.contains(arg.name.as_str()))
+    {
+        push_generated_arg_params_for_arg(&mut params, &mut used, arg)?;
+    }
+
+    for slot in rich_slots {
+        let name = rust_value_identifier(slot)?;
+        push_arg_param(
+            &mut params,
+            &mut used,
+            name.clone(),
+            "TSlot".to_string(),
+            slot.clone(),
+        )?;
+        slot_fields.push((slot.as_str(), name));
+    }
+
+    let param_values = params
+        .iter()
+        .map(|param| format!("{}: {}", param.name, param.ty))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let arg_insertions = args
+        .iter()
+        .map(|arg| {
+            if rich_slot_names.contains(arg.name.as_str()) {
+                let key = &arg.name;
+                Ok(format!(
+                    "        args.insert({key:?}, mf2_i18n::Value::Any(::std::boxed::Box::new(())));"
+                ))
+            } else {
+                render_arg_insertion(arg)
+            }
+        })
+        .collect::<Result<Vec<_>, NativeModuleBuildError>>()?
+        .join("\n");
+    let field_declarations = slot_fields
+        .iter()
+        .map(|(_, name)| format!("    {name}: TSlot,"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let field_initializers = slot_fields
+        .iter()
+        .map(|(_, name)| format!("            {name},"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let slot_matches = slot_fields
+        .iter()
+        .map(|(slot, name)| format!("            {slot:?} => self.{name}.clone(),"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(format!(
+        "\npub struct {struct_name}<TSlot> {{\n    args: mf2_i18n::Args,\n{field_declarations}\n}}\n\nimpl<TSlot> {struct_name}<TSlot> {{\n    pub fn new({param_values}) -> Self {{\n        let mut args = mf2_i18n::Args::new();\n{arg_insertions}\n        Self {{\n            args,\n{field_initializers}\n        }}\n    }}\n\n    pub fn as_args(&self) -> &mf2_i18n::Args {{\n        &self.args\n    }}\n\n    pub fn into_args(self) -> mf2_i18n::Args {{\n        self.args\n    }}\n}}\n\nimpl<TSlot: Clone> {struct_name}<TSlot> {{\n    pub fn slot(&self, name: &str) -> TSlot {{\n        match name {{\n{slot_matches}\n            _ => panic!(\"mf2_i18n generated rich text slot was not declared\"),\n        }}\n    }}\n}}\n\nimpl<TSlot> ::core::convert::AsRef<mf2_i18n::Args> for {struct_name}<TSlot> {{\n    fn as_ref(&self) -> &mf2_i18n::Args {{\n        self.as_args()\n    }}\n}}\n\npub fn render_rich_{suffix}<TSlot: Clone>(message: &mf2_i18n::RichTextMessage, args: &{struct_name}<TSlot>) -> Vec<mf2_i18n::leptos::RichTextRenderNode<TSlot>> {{\n    mf2_i18n::leptos::render_rich_text(message, |name| args.slot(name))\n}}\n\npub fn try_rich_{suffix}<TSlot: Clone>(context: &mf2_i18n::leptos::I18nContext, args: &{struct_name}<TSlot>) -> mf2_i18n::NativeResult<Vec<mf2_i18n::leptos::RichTextRenderNode<TSlot>>> {{\n    let message = context.try_rich_text_with_args(MessageKey::{variant}, args.as_args())?;\n    Ok(render_rich_{suffix}(&message, args))\n}}\n\npub fn rich_{suffix}<TSlot: Clone>(context: &mf2_i18n::leptos::I18nContext, args: &{struct_name}<TSlot>) -> Vec<mf2_i18n::leptos::RichTextRenderNode<TSlot>> {{\n    try_rich_{suffix}(context, args).expect(\"mf2_i18n generated rich text formatting failed\")\n}}\n"
+    ))
 }
 
 fn compile_catalog_pack(
@@ -1088,85 +1169,98 @@ fn generated_args_struct_name(key: &GeneratedMessageKey) -> String {
     format!("{}Args", key.variant)
 }
 
+fn generated_rich_args_struct_name(key: &GeneratedMessageKey) -> String {
+    format!("{}RichArgs", key.variant)
+}
+
 fn generated_arg_params(
     args: &[MessageArg],
 ) -> Result<Vec<GeneratedArgParam>, NativeModuleBuildError> {
     let mut used = BTreeMap::<String, String>::new();
     let mut params = Vec::new();
     for arg in args {
-        match arg.arg_type {
-            ArgType::String => push_arg_param(
-                &mut params,
-                &mut used,
-                rust_value_identifier(&arg.name)?,
-                "impl Into<String>".to_string(),
-                arg.name.clone(),
-            )?,
-            ArgType::Number => push_arg_param(
-                &mut params,
-                &mut used,
-                rust_value_identifier(&arg.name)?,
-                "f64".to_string(),
-                arg.name.clone(),
-            )?,
-            ArgType::Bool => push_arg_param(
-                &mut params,
-                &mut used,
-                rust_value_identifier(&arg.name)?,
-                "bool".to_string(),
-                arg.name.clone(),
-            )?,
-            ArgType::DateTime => push_arg_param(
-                &mut params,
-                &mut used,
-                rust_value_identifier(&arg.name)?,
-                "mf2_i18n::DateTimeValue".to_string(),
-                arg.name.clone(),
-            )?,
-            ArgType::Unit => {
-                let base = rust_value_identifier(&arg.name)?;
-                push_arg_param(
-                    &mut params,
-                    &mut used,
-                    format!("{base}_value"),
-                    "f64".to_string(),
-                    format!("{}.value", arg.name),
-                )?;
-                push_arg_param(
-                    &mut params,
-                    &mut used,
-                    format!("{base}_unit_id"),
-                    "u32".to_string(),
-                    format!("{}.unit_id", arg.name),
-                )?;
-            }
-            ArgType::Currency => {
-                let base = rust_value_identifier(&arg.name)?;
-                push_arg_param(
-                    &mut params,
-                    &mut used,
-                    format!("{base}_value"),
-                    "f64".to_string(),
-                    format!("{}.value", arg.name),
-                )?;
-                push_arg_param(
-                    &mut params,
-                    &mut used,
-                    format!("{base}_code"),
-                    "[u8; 3]".to_string(),
-                    format!("{}.code", arg.name),
-                )?;
-            }
-            ArgType::Any => push_arg_param(
-                &mut params,
-                &mut used,
-                rust_value_identifier(&arg.name)?,
-                "mf2_i18n::Value".to_string(),
-                arg.name.clone(),
-            )?,
-        }
+        push_generated_arg_params_for_arg(&mut params, &mut used, arg)?;
     }
     Ok(params)
+}
+
+fn push_generated_arg_params_for_arg(
+    params: &mut Vec<GeneratedArgParam>,
+    used: &mut BTreeMap<String, String>,
+    arg: &MessageArg,
+) -> Result<(), NativeModuleBuildError> {
+    match arg.arg_type {
+        ArgType::String => push_arg_param(
+            params,
+            used,
+            rust_value_identifier(&arg.name)?,
+            "impl Into<String>".to_string(),
+            arg.name.clone(),
+        )?,
+        ArgType::Number => push_arg_param(
+            params,
+            used,
+            rust_value_identifier(&arg.name)?,
+            "f64".to_string(),
+            arg.name.clone(),
+        )?,
+        ArgType::Bool => push_arg_param(
+            params,
+            used,
+            rust_value_identifier(&arg.name)?,
+            "bool".to_string(),
+            arg.name.clone(),
+        )?,
+        ArgType::DateTime => push_arg_param(
+            params,
+            used,
+            rust_value_identifier(&arg.name)?,
+            "mf2_i18n::DateTimeValue".to_string(),
+            arg.name.clone(),
+        )?,
+        ArgType::Unit => {
+            let base = rust_value_identifier(&arg.name)?;
+            push_arg_param(
+                params,
+                used,
+                format!("{base}_value"),
+                "f64".to_string(),
+                format!("{}.value", arg.name),
+            )?;
+            push_arg_param(
+                params,
+                used,
+                format!("{base}_unit_id"),
+                "u32".to_string(),
+                format!("{}.unit_id", arg.name),
+            )?;
+        }
+        ArgType::Currency => {
+            let base = rust_value_identifier(&arg.name)?;
+            push_arg_param(
+                params,
+                used,
+                format!("{base}_value"),
+                "f64".to_string(),
+                format!("{}.value", arg.name),
+            )?;
+            push_arg_param(
+                params,
+                used,
+                format!("{base}_code"),
+                "[u8; 3]".to_string(),
+                format!("{}.code", arg.name),
+            )?;
+        }
+        ArgType::Any => push_arg_param(
+            params,
+            used,
+            rust_value_identifier(&arg.name)?,
+            "mf2_i18n::Value".to_string(),
+            arg.name.clone(),
+        )?,
+    }
+    Ok(())
 }
 
 fn push_arg_param(
@@ -1531,11 +1625,19 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         fs::create_dir_all(&spanish_dir).expect("spanish locale dir");
         write_catalog(
             &english_dir.join("homepage.json"),
-            &[("title", "Radroots"), ("welcome", "Welcome { $name }")],
+            &[
+                ("title", "Radroots"),
+                ("welcome", "Welcome { $name }"),
+                ("cta", "Use { $ios :slot } or { $android :slot }."),
+            ],
         );
         write_catalog(
             &spanish_dir.join("homepage.json"),
-            &[("title", "Raices"), ("welcome", "Hola { $name }")],
+            &[
+                ("title", "Raices"),
+                ("welcome", "Hola { $name }"),
+                ("cta", "Usa { $android :slot } o { $ios :slot }."),
+            ],
         );
         fs::write(root.join("id_salt.txt"), "salt").expect("salt");
 
@@ -1598,6 +1700,17 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
             "pub fn text_homepage_welcome(context: &mf2_i18n::leptos::I18nContext, args: &HomepageWelcomeArgs) -> String"
         ));
         assert!(generated_module.contains("F: Fn() -> HomepageWelcomeArgs + Clone + 'static,"));
+        assert!(generated_module.contains("pub struct HomepageCtaRichArgs<TSlot>"));
+        assert!(generated_module.contains(
+            "pub fn try_rich_homepage_cta<TSlot: Clone>(context: &mf2_i18n::leptos::I18nContext, args: &HomepageCtaRichArgs<TSlot>)"
+        ));
+        assert!(generated_module.contains(
+            "pub fn rich_homepage_cta<TSlot: Clone>(context: &mf2_i18n::leptos::I18nContext, args: &HomepageCtaRichArgs<TSlot>)"
+        ));
+        assert!(
+            generated_module
+                .contains("mf2_i18n::leptos::render_rich_text(message, |name| args.slot(name))")
+        );
 
         fs::remove_dir_all(&root).ok();
     }

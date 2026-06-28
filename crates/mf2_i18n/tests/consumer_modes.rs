@@ -212,11 +212,11 @@ sync_html_lang = true
     );
     write_file(
         &fixture_dir.join("locales/en/homepage.mf2"),
-        "title = Radroots\n\nwelcome = Welcome { $name }\n",
+        "title = Radroots\n\nwelcome = Welcome { $name }\n\ncta = Use { $ios :slot } or { $android :slot }.\n",
     );
     write_file(
         &fixture_dir.join("locales/es/homepage.mf2"),
-        "title = Raices\n\nwelcome = Hola { $name }\n",
+        "title = Raices\n\nwelcome = Hola { $name }\n\ncta = Usa { $android :slot } o { $ios :slot }.\n",
     );
     write_file(
         &fixture_dir.join("build.rs"),
@@ -248,11 +248,11 @@ mod tests {
     use mf2_i18n::leptos::{I18nDocument, RichTextMessage, RichTextPart, RichTextRenderNode};
 
     use super::{
-        HomepageWelcomeArgs, LEPTOS_MODULE_NAME, MessageKey, leptos_document_title_key,
-        leptos_sync_html_lang, localizer, t_homepage_title, t_homepage_welcome,
-        text_homepage_title, text_homepage_title_or_key, text_homepage_title_signal,
-        text_homepage_welcome, text_homepage_welcome_signal, try_text_homepage_title,
-        try_text_homepage_welcome, sync_leptos_document_with,
+        HomepageCtaRichArgs, HomepageWelcomeArgs, LEPTOS_MODULE_NAME, MessageKey,
+        leptos_document_title_key, leptos_sync_html_lang, localizer, rich_homepage_cta,
+        t_homepage_title, t_homepage_welcome, text_homepage_title, text_homepage_title_or_key,
+        text_homepage_title_signal, text_homepage_welcome, text_homepage_welcome_signal,
+        try_text_homepage_title, try_text_homepage_welcome, sync_leptos_document_with,
     };
 
     #[derive(Clone, Default)]
@@ -360,6 +360,33 @@ mod tests {
                 RichTextRenderNode::Text(".".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn generated_rich_text_helpers_preserve_localized_slot_order() {
+        Owner::new().with(|| {
+            let context = mf2_i18n::leptos::provide_i18n_with_locale(localizer(), "es")
+                .expect("context");
+            let args = HomepageCtaRichArgs::new("ios".to_string(), "android".to_string());
+            let rendered = rich_homepage_cta(&context, &args);
+
+            assert_eq!(
+                rendered,
+                vec![
+                    RichTextRenderNode::Text("Usa ".to_string()),
+                    RichTextRenderNode::Slot {
+                        name: "android".to_string(),
+                        value: "android".to_string(),
+                    },
+                    RichTextRenderNode::Text(" o ".to_string()),
+                    RichTextRenderNode::Slot {
+                        name: "ios".to_string(),
+                        value: "ios".to_string(),
+                    },
+                    RichTextRenderNode::Text(".".to_string()),
+                ]
+            );
+        });
     }
 }
 "#,
