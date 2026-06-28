@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -25,6 +25,10 @@ pub struct ProjectConfig {
     pub micro_locales_registry: Option<String>,
     #[serde(default = "default_project_salt_path")]
     pub project_salt_path: String,
+    #[serde(default)]
+    pub native: NativeConfig,
+    #[serde(default)]
+    pub leptos: LeptosConfig,
     #[serde(default)]
     pub web: WebConfig,
 }
@@ -55,6 +59,47 @@ pub struct ProjectTargetConfig {
     pub out_dir: String,
     #[serde(default)]
     pub typescript: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct NativeConfig {
+    #[serde(default)]
+    pub targets: Vec<NativeTargetConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NativeTargetConfig {
+    pub name: String,
+    pub out_dir: String,
+    pub module_name: String,
+    #[serde(default)]
+    pub module_macro_path: Option<String>,
+    #[serde(default)]
+    pub release_id: Option<String>,
+    #[serde(default)]
+    pub generated_at: Option<String>,
+    #[serde(default)]
+    pub locales: Vec<String>,
+    #[serde(default)]
+    pub namespaces: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LeptosConfig {
+    #[serde(default)]
+    pub targets: Vec<LeptosTargetConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LeptosTargetConfig {
+    pub name: String,
+    pub native_target: String,
+    pub out_dir: String,
+    pub module_name: String,
+    #[serde(default)]
+    pub document_title_key: Option<String>,
+    #[serde(default)]
+    pub sync_html_lang: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -193,6 +238,43 @@ pub enum ProjectConfigError {
     UnknownTargetSource { target: String, source_name: String },
     #[error("target {target} out_dir must not be empty")]
     EmptyTargetOutDir { target: String },
+    #[error("native target name must not be empty")]
+    EmptyNativeTargetName,
+    #[error("duplicate native target name {0}")]
+    DuplicateNativeTargetName(String),
+    #[error("native target {target} out_dir must not be empty")]
+    EmptyNativeTargetOutDir { target: String },
+    #[error("native target {target} module_name must not be empty")]
+    EmptyNativeModuleName { target: String },
+    #[error("native target {target} module_macro_path must not be empty when provided")]
+    EmptyNativeModuleMacroPath { target: String },
+    #[error("native target {target} release_id must not be empty when provided")]
+    EmptyNativeReleaseId { target: String },
+    #[error("native target {target} generated_at must not be empty when provided")]
+    EmptyNativeGeneratedAt { target: String },
+    #[error("native target {target} locale entries must not be empty")]
+    EmptyNativeLocale { target: String },
+    #[error("native target {target} namespace entries must not be empty")]
+    EmptyNativeNamespace { target: String },
+    #[error("leptos target name must not be empty")]
+    EmptyLeptosTargetName,
+    #[error("duplicate leptos target name {0}")]
+    DuplicateLeptosTargetName(String),
+    #[error("leptos target {target} references duplicate rust target name")]
+    DuplicateRustTargetName { target: String },
+    #[error("leptos target {target} native_target must not be empty")]
+    EmptyLeptosNativeTarget { target: String },
+    #[error("leptos target {target} references unknown native target {native_target}")]
+    UnknownLeptosNativeTarget {
+        target: String,
+        native_target: String,
+    },
+    #[error("leptos target {target} out_dir must not be empty")]
+    EmptyLeptosTargetOutDir { target: String },
+    #[error("leptos target {target} module_name must not be empty")]
+    EmptyLeptosModuleName { target: String },
+    #[error("leptos target {target} document_title_key must not be empty when provided")]
+    EmptyLeptosDocumentTitleKey { target: String },
     #[error(transparent)]
     Web(#[from] WebTargetConfigError),
 }
@@ -213,6 +295,8 @@ impl Default for ProjectConfig {
             source_dirs: vec!["locales".to_string()],
             micro_locales_registry: Some("micro-locales.toml".to_string()),
             project_salt_path: "id_salt.txt".to_string(),
+            native: NativeConfig::default(),
+            leptos: LeptosConfig::default(),
             web: WebConfig::default(),
         }
     }
@@ -224,6 +308,8 @@ impl ProjectConfig {
         validate_locales(&self.default_locale, &self.locales)?;
         validate_sources(&self.sources)?;
         validate_targets(&self.targets, &self.sources)?;
+        self.native.validate()?;
+        self.leptos.validate(&self.native)?;
         self.web.validate()?;
         Ok(())
     }
@@ -286,6 +372,168 @@ impl WebConfig {
                     target.name.clone(),
                 ));
             }
+        }
+        Ok(())
+    }
+}
+
+impl NativeConfig {
+    pub fn target(&self, name: &str) -> Option<&NativeTargetConfig> {
+        self.targets.iter().find(|target| target.name == name)
+    }
+
+    pub fn validate(&self) -> Result<(), ProjectConfigError> {
+        let mut names = std::collections::BTreeSet::new();
+        for target in &self.targets {
+            target.validate()?;
+            if !names.insert(target.name.clone()) {
+                return Err(ProjectConfigError::DuplicateNativeTargetName(
+                    target.name.clone(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl NativeTargetConfig {
+    pub fn resolve_out_dir(&self, config_path: &Path) -> PathBuf {
+        resolve_config_relative_path(config_path, &self.out_dir)
+    }
+
+    pub fn module_macro_path(&self) -> Option<&str> {
+        self.module_macro_path.as_deref()
+    }
+
+    fn validate(&self) -> Result<(), ProjectConfigError> {
+        if self.name.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyNativeTargetName);
+        }
+        if self.out_dir.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyNativeTargetOutDir {
+                target: self.name.clone(),
+            });
+        }
+        if self.module_name.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyNativeModuleName {
+                target: self.name.clone(),
+            });
+        }
+        if self
+            .module_macro_path
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(ProjectConfigError::EmptyNativeModuleMacroPath {
+                target: self.name.clone(),
+            });
+        }
+        if self
+            .release_id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(ProjectConfigError::EmptyNativeReleaseId {
+                target: self.name.clone(),
+            });
+        }
+        if self
+            .generated_at
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(ProjectConfigError::EmptyNativeGeneratedAt {
+                target: self.name.clone(),
+            });
+        }
+        if self.locales.iter().any(|locale| locale.trim().is_empty()) {
+            return Err(ProjectConfigError::EmptyNativeLocale {
+                target: self.name.clone(),
+            });
+        }
+        if self
+            .namespaces
+            .iter()
+            .any(|namespace| namespace.trim().is_empty())
+        {
+            return Err(ProjectConfigError::EmptyNativeNamespace {
+                target: self.name.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl LeptosConfig {
+    pub fn target(&self, name: &str) -> Option<&LeptosTargetConfig> {
+        self.targets.iter().find(|target| target.name == name)
+    }
+
+    pub fn validate(&self, native: &NativeConfig) -> Result<(), ProjectConfigError> {
+        let native_names = native
+            .targets
+            .iter()
+            .map(|target| target.name.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut names = std::collections::BTreeSet::new();
+        for target in &self.targets {
+            target.validate(&native_names)?;
+            if !names.insert(target.name.clone()) {
+                return Err(ProjectConfigError::DuplicateLeptosTargetName(
+                    target.name.clone(),
+                ));
+            }
+            if native_names.contains(target.name.as_str()) {
+                return Err(ProjectConfigError::DuplicateRustTargetName {
+                    target: target.name.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+impl LeptosTargetConfig {
+    pub fn resolve_out_dir(&self, config_path: &Path) -> PathBuf {
+        resolve_config_relative_path(config_path, &self.out_dir)
+    }
+
+    fn validate(
+        &self,
+        native_names: &std::collections::BTreeSet<&str>,
+    ) -> Result<(), ProjectConfigError> {
+        if self.name.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyLeptosTargetName);
+        }
+        if self.native_target.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyLeptosNativeTarget {
+                target: self.name.clone(),
+            });
+        }
+        if !native_names.contains(self.native_target.as_str()) {
+            return Err(ProjectConfigError::UnknownLeptosNativeTarget {
+                target: self.name.clone(),
+                native_target: self.native_target.clone(),
+            });
+        }
+        if self.out_dir.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyLeptosTargetOutDir {
+                target: self.name.clone(),
+            });
+        }
+        if self.module_name.trim().is_empty() {
+            return Err(ProjectConfigError::EmptyLeptosModuleName {
+                target: self.name.clone(),
+            });
+        }
+        if self
+            .document_title_key
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(ProjectConfigError::EmptyLeptosDocumentTitleKey {
+                target: self.name.clone(),
+            });
         }
         Ok(())
     }
@@ -437,6 +685,17 @@ fn default_micro_locales_registry() -> Option<String> {
 
 fn default_project_salt_path() -> String {
     "id_salt.txt".to_string()
+}
+
+fn resolve_config_relative_path(config_path: &Path, value: &str) -> PathBuf {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        return path;
+    }
+    config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(path)
 }
 
 fn validate_version(version: u32) -> Result<(), ProjectConfigError> {
@@ -601,6 +860,8 @@ project_salt_path = "id_salt.txt"
         assert_eq!(config.version, PROJECT_CONFIG_VERSION);
         assert_eq!(config.project_salt_path, "id_salt.txt");
         assert_eq!(config.sources[0].root, "locales");
+        assert!(config.native.targets.is_empty());
+        assert!(config.leptos.targets.is_empty());
         assert!(config.web.targets.is_empty());
         assert!(config.validate().is_ok());
         assert!(config.validate_web_targets().is_ok());
@@ -639,6 +900,183 @@ typescript = true
         assert_eq!(target.mode, WebTargetMode::Hybrid);
         assert_eq!(target.framework, Some(WebFramework::React));
         assert!(config.validate().is_ok());
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn loads_native_and_leptos_targets_with_config_relative_paths() {
+        let path = temp_path("rust_targets");
+        fs::write(
+            &path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[native.targets]]
+name = "app-native"
+out_dir = "target/mf2/native"
+module_name = "app_i18n"
+module_macro_path = "mf2_i18n::define_i18n_module!"
+release_id = "app-local"
+generated_at = "2026-06-28T00:00:00Z"
+locales = ["en"]
+namespaces = ["common"]
+
+[[leptos.targets]]
+name = "app-leptos"
+native_target = "app-native"
+out_dir = "src/generated/i18n"
+module_name = "app_i18n"
+document_title_key = "common.home.title"
+sync_html_lang = true
+"#,
+        )
+        .expect("write");
+
+        let config = load_project_config_or_default(&path).expect("config");
+        let native = config.native.target("app-native").expect("native");
+        assert_eq!(native.module_name, "app_i18n");
+        assert_eq!(
+            native.resolve_out_dir(&path),
+            path.parent().expect("parent").join("target/mf2/native")
+        );
+        let leptos = config.leptos.target("app-leptos").expect("leptos");
+        assert_eq!(leptos.native_target, "app-native");
+        assert!(leptos.sync_html_lang);
+        assert_eq!(
+            leptos.resolve_out_dir(&path),
+            path.parent().expect("parent").join("src/generated/i18n")
+        );
+        assert!(config.validate().is_ok());
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_leptos_targets_with_unknown_native_target() {
+        let path = temp_path("unknown_leptos_native");
+        fs::write(
+            &path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[leptos.targets]]
+name = "app"
+native_target = "missing"
+out_dir = "src/generated/i18n"
+module_name = "app_i18n"
+"#,
+        )
+        .expect("write");
+
+        let err = load_project_config_or_default(&path).expect_err("native target");
+        assert!(matches!(
+            err,
+            BuildIoError::Config(message)
+                if message == "leptos target app references unknown native target missing"
+        ));
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_duplicate_native_and_leptos_rust_target_names() {
+        let path = temp_path("duplicate_rust_target");
+        fs::write(
+            &path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[native.targets]]
+name = "app"
+out_dir = "target/mf2/native"
+module_name = "app_i18n"
+
+[[leptos.targets]]
+name = "app"
+native_target = "app"
+out_dir = "src/generated/i18n"
+module_name = "app_i18n"
+"#,
+        )
+        .expect("write");
+
+        let err = load_project_config_or_default(&path).expect_err("duplicate rust target");
+        assert!(matches!(
+            err,
+            BuildIoError::Config(message)
+                if message == "leptos target app references duplicate rust target name"
+        ));
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_empty_native_and_leptos_target_fields() {
+        let path = temp_path("empty_native_module");
+        fs::write(
+            &path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[native.targets]]
+name = "app"
+out_dir = "target/mf2/native"
+module_name = ""
+"#,
+        )
+        .expect("write");
+
+        let err = load_project_config_or_default(&path).expect_err("empty native module");
+        assert!(matches!(
+            err,
+            BuildIoError::Config(message)
+                if message == "native target app module_name must not be empty"
+        ));
+        fs::remove_file(&path).ok();
+
+        let path = temp_path("empty_leptos_title");
+        fs::write(
+            &path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[native.targets]]
+name = "app-native"
+out_dir = "target/mf2/native"
+module_name = "app_i18n"
+
+[[leptos.targets]]
+name = "app"
+native_target = "app-native"
+out_dir = "src/generated/i18n"
+module_name = "app_i18n"
+document_title_key = ""
+"#,
+        )
+        .expect("write");
+
+        let err = load_project_config_or_default(&path).expect_err("empty title key");
+        assert!(matches!(
+            err,
+            BuildIoError::Config(message)
+                if message == "leptos target app document_title_key must not be empty when provided"
+        ));
 
         fs::remove_file(&path).ok();
     }

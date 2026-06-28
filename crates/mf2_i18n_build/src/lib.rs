@@ -37,9 +37,10 @@ pub mod web_runtime;
 
 pub use crate::compiler::CompileError;
 pub use crate::config::{
-    PROJECT_CONFIG_VERSION, ProjectConfig, ProjectConfigError, ProjectTargetConfig, SourceConfig,
-    SourceLayout, WebConfig, WebFramework, WebPreset, WebStalePolicy, WebTargetConfig,
-    WebTargetConfigError, WebTargetMode, load_project_config, load_project_config_or_default,
+    LeptosConfig, LeptosTargetConfig, NativeConfig, NativeTargetConfig, PROJECT_CONFIG_VERSION,
+    ProjectConfig, ProjectConfigError, ProjectTargetConfig, SourceConfig, SourceLayout, WebConfig,
+    WebFramework, WebPreset, WebStalePolicy, WebTargetConfig, WebTargetConfigError, WebTargetMode,
+    load_project_config, load_project_config_or_default,
 };
 pub use crate::diagnostic::{Diagnostic, DiagnosticReport, DiagnosticSeverity};
 pub use crate::error::BuildIoError;
