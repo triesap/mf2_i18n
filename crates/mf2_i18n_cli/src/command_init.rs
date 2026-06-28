@@ -49,7 +49,7 @@ pub fn run_init(options: &InitOptions) -> Result<InitReport, InitCommandError> {
     fs::write(&options.config_path, render_config(options))?;
     write_starter_locale(config_root, options)?;
     write_project_salt(config_root)?;
-    write_generated_ignore(config_root)?;
+    write_generated_ignore(config_root, options)?;
     if let Some(package_root) = package_root.as_deref() {
         update_package_scripts(package_root, options)?;
     }
@@ -59,6 +59,10 @@ pub fn run_init(options: &InitOptions) -> Result<InitReport, InitCommandError> {
 }
 
 fn render_config(options: &InitOptions) -> String {
+    if is_leptos_preset(&options.preset) {
+        return render_leptos_config(options);
+    }
+
     format!(
         "version = 1\n\
 default_locale = \"en\"\n\
@@ -77,6 +81,33 @@ typescript = true\n",
         source_layout = options.source_layout,
         target_name = options.target_name,
         preset = options.preset
+    )
+}
+
+fn render_leptos_config(options: &InitOptions) -> String {
+    let native_target_name = native_target_name(options);
+    format!(
+        "version = 1\n\
+default_locale = \"en\"\n\
+locales = [\"en\"]\n\n\
+[[sources]]\n\
+name = \"site\"\n\
+layout = {source_layout:?}\n\
+root = \"locales\"\n\
+namespace_glob = \"*.mf2\"\n\n\
+[[native.targets]]\n\
+name = {native_target_name:?}\n\
+out_dir = \"target/mf2/native\"\n\
+module_name = \"app_i18n\"\n\n\
+[[leptos.targets]]\n\
+name = {target_name:?}\n\
+native_target = {native_target_name:?}\n\
+out_dir = \"src/generated/i18n\"\n\
+module_name = \"app_i18n\"\n\
+sync_html_lang = true\n",
+        source_layout = options.source_layout,
+        target_name = options.target_name,
+        native_target_name = native_target_name
     )
 }
 
@@ -125,8 +156,15 @@ fn write_project_salt(project_root: &Path) -> Result<(), InitCommandError> {
     Ok(())
 }
 
-fn write_generated_ignore(project_root: &Path) -> Result<(), InitCommandError> {
-    let generated_dir = project_root.join("src/generated/mf2");
+fn write_generated_ignore(
+    project_root: &Path,
+    options: &InitOptions,
+) -> Result<(), InitCommandError> {
+    let generated_dir = if is_leptos_preset(&options.preset) {
+        project_root.join("src/generated/i18n")
+    } else {
+        project_root.join("src/generated/mf2")
+    };
     fs::create_dir_all(&generated_dir)?;
     fs::write(generated_dir.join(".gitignore"), "*\n!.gitignore\n")?;
     Ok(())
@@ -164,23 +202,44 @@ fn update_package_scripts(
         .ok_or_else(|| serde_json::Error::io(std::io::Error::other("scripts is not object")))?;
     scripts.insert(
         "mf2:gen".to_string(),
-        Value::String(format!(
-            "mf2-i18n build-web --config {config_path} --target {}",
-            options.target_name,
-        )),
+        Value::String(mf2_gen_script(config_path.as_str(), options)),
     );
-    scripts.insert(
-        "mf2:check".to_string(),
-        Value::String(format!(
-            "mf2-i18n check-web --config {config_path} --target {}",
-            options.target_name,
-        )),
-    );
+    if !is_leptos_preset(&options.preset) {
+        scripts.insert(
+            "mf2:check".to_string(),
+            Value::String(format!(
+                "mf2-i18n check-web --config {config_path} --target {}",
+                options.target_name,
+            )),
+        );
+    }
 
     let mut encoded = serde_json::to_string_pretty(&package)?;
     encoded.push('\n');
     fs::write(package_path, encoded)?;
     Ok(())
+}
+
+fn mf2_gen_script(config_path: &str, options: &InitOptions) -> String {
+    if is_leptos_preset(&options.preset) {
+        format!(
+            "mf2-i18n build-native --config {config_path} --target {}",
+            native_target_name(options)
+        )
+    } else {
+        format!(
+            "mf2-i18n build-web --config {config_path} --target {}",
+            options.target_name
+        )
+    }
+}
+
+fn native_target_name(options: &InitOptions) -> String {
+    format!("{}-native", options.target_name)
+}
+
+fn is_leptos_preset(preset: &str) -> bool {
+    preset == "leptos"
 }
 
 fn validate_package_script_args(
@@ -295,6 +354,55 @@ mod tests {
             "\"mf2:check\": \"mf2-i18n check-web --config i18n/mf2_i18n.toml --target app\""
         ));
         assert!(config_dir.join("locales/en.mf2").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn writes_leptos_config_without_web_targets() {
+        let dir = temp_dir();
+        let config_path = dir.join("mf2_i18n.toml");
+        run_init(&InitOptions {
+            config_path: config_path.clone(),
+            preset: "leptos".to_string(),
+            source_layout: "locale-namespace".to_string(),
+            target_name: "app".to_string(),
+        })
+        .expect("init");
+
+        let contents = fs::read_to_string(config_path).expect("read");
+        assert!(contents.contains("[[native.targets]]"));
+        assert!(contents.contains("name = \"app-native\""));
+        assert!(contents.contains("[[leptos.targets]]"));
+        assert!(contents.contains("native_target = \"app-native\""));
+        assert!(!contents.contains("[[targets]]"));
+        assert!(!contents.contains("typescript = true"));
+        assert!(dir.join("locales/en/app.mf2").exists());
+        assert!(dir.join("src/generated/i18n/.gitignore").exists());
+        assert!(!dir.join("src/generated/mf2/.gitignore").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn leptos_package_script_uses_native_build_target() {
+        let dir = temp_dir();
+        fs::write(dir.join("package.json"), "{}").expect("package");
+        let config_path = dir.join("mf2_i18n.toml");
+        run_init(&InitOptions {
+            config_path,
+            preset: "leptos".to_string(),
+            source_layout: "locale-namespace".to_string(),
+            target_name: "app".to_string(),
+        })
+        .expect("init");
+
+        let package = fs::read_to_string(dir.join("package.json")).expect("read");
+        assert!(package.contains(
+            "\"mf2:gen\": \"mf2-i18n build-native --config mf2_i18n.toml --target app-native\""
+        ));
+        assert!(!package.contains("mf2:check"));
+        assert!(!package.contains("build-web"));
 
         fs::remove_dir_all(&dir).ok();
     }

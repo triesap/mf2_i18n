@@ -44,11 +44,17 @@ impl ProjectCatalogLoad {
 #[derive(Debug, Clone, Default)]
 pub struct ProjectCatalogLoadOptions {
     ignored_key_match_namespaces: BTreeSet<String>,
+    allow_key_mismatch: bool,
 }
 
 impl ProjectCatalogLoadOptions {
     pub fn ignore_key_match_namespace(mut self, namespace: impl Into<String>) -> Self {
         self.ignored_key_match_namespaces.insert(namespace.into());
+        self
+    }
+
+    pub fn allow_key_mismatch(mut self) -> Self {
+        self.allow_key_mismatch = true;
         self
     }
 }
@@ -151,11 +157,13 @@ pub fn load_project_catalogs_with_options(
         return Err(ProjectCatalogError::MissingDefaultLocale(default_locale));
     }
 
-    ensure_catalog_keys_match(
-        &default_locale,
-        &catalogs,
-        &options.ignored_key_match_namespaces,
-    )?;
+    if !options.allow_key_mismatch {
+        ensure_catalog_keys_match(
+            &default_locale,
+            &catalogs,
+            &options.ignored_key_match_namespaces,
+        )?;
+    }
 
     Ok(ProjectCatalogLoad {
         catalogs,

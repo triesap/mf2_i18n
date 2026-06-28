@@ -58,8 +58,8 @@ pub use crate::platform::{
 };
 pub use crate::project::{ProjectError, ProjectLayout, resolve_config_relative_path};
 pub use crate::project_catalogs::{
-    ProjectCatalog, ProjectCatalogError, ProjectCatalogLoad, ProjectCatalogMessage,
-    load_project_catalogs,
+    ProjectCatalog, ProjectCatalogError, ProjectCatalogLoad, ProjectCatalogLoadOptions,
+    ProjectCatalogMessage, load_project_catalogs, load_project_catalogs_with_options,
 };
 pub use crate::project_pipeline::{
     NativeModuleBuildError, NativeModuleBuildOptions, NativeModuleBuildOutput,
