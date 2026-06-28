@@ -38,13 +38,14 @@ fn assert_manifest_tests(name: &str, manifest_path: &Path) {
 }
 
 fn assert_manifest_command_succeeds(name: &str, manifest_path: &Path, command: &str) {
+    let target_dir = unique_target_dir(name);
     let output = Command::new(cargo_bin())
         .arg(command)
         .arg("--quiet")
         .arg("--manifest-path")
         .arg(manifest_path)
         .arg("--target-dir")
-        .arg(unique_target_dir(name))
+        .arg(&target_dir)
         .output()
         .expect("fixture cargo check should run");
 
@@ -53,6 +54,8 @@ fn assert_manifest_command_succeeds(name: &str, manifest_path: &Path, command: &
         let stderr = String::from_utf8_lossy(&output.stderr);
         panic!("fixture `{name}` failed cargo {command}\nstdout:\n{stdout}\nstderr:\n{stderr}");
     }
+
+    fs::remove_dir_all(target_dir).ok();
 }
 
 fn assert_fixture_builds(name: &str) {
@@ -82,6 +85,7 @@ mf2_i18n = {{ path = {path:?}, default-features = false, features = {features} }
     .expect("manifest");
     fs::write(src_dir.join("lib.rs"), source).expect("source");
     assert_manifest_builds(name, &fixture_dir.join("Cargo.toml"));
+    fs::remove_dir_all(fixture_dir).ok();
 }
 
 fn write_file(path: &Path, contents: &str) {
@@ -420,4 +424,5 @@ mod tests {
     );
 
     assert_manifest_tests("homepage_leptos", &fixture_dir.join("Cargo.toml"));
+    fs::remove_dir_all(fixture_dir).ok();
 }
