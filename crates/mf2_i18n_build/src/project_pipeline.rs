@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::artifacts::{write_id_map, write_id_map_hash};
 use crate::compiler::{CompileError, compile_message};
+use crate::config::NativeTargetConfig;
 use crate::generated_keys::{
     GeneratedKeyError, GeneratedMessageKey, build_generated_message_keys, rust_value_identifier,
     variant_function_suffix,
@@ -169,6 +170,34 @@ impl NativeModuleBuildOptions {
         self
     }
 
+    pub fn from_target_config(
+        config_path: impl Into<PathBuf>,
+        out_dir: impl Into<PathBuf>,
+        target: &NativeTargetConfig,
+    ) -> Self {
+        let mut options = Self::new(config_path, out_dir, &target.module_name)
+            .with_locales(target.locales.iter().cloned())
+            .with_namespaces(target.namespaces.iter().cloned());
+
+        if let Some(module_macro_path) = target.module_macro_path() {
+            options = options.with_module_macro_path(module_macro_path);
+        }
+
+        if target.release_id.is_some() || target.generated_at.is_some() {
+            let release_id = target
+                .release_id
+                .clone()
+                .unwrap_or_else(|| options.release_id().to_string());
+            let generated_at = target
+                .generated_at
+                .clone()
+                .unwrap_or_else(|| options.generated_at().to_string());
+            options = options.with_release_metadata(release_id, generated_at);
+        }
+
+        options
+    }
+
     pub fn config_path(&self) -> &Path {
         &self.config_path
     }
@@ -199,6 +228,39 @@ impl NativeModuleBuildOptions {
 
     pub fn namespace_filter(&self) -> &[String] {
         &self.namespace_filter
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CargoNativeModuleBuildOptions {
+    config_path: PathBuf,
+    target_name: String,
+    out_dir: PathBuf,
+}
+
+impl CargoNativeModuleBuildOptions {
+    pub fn new(
+        config_path: impl Into<PathBuf>,
+        target_name: impl Into<String>,
+        out_dir: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            config_path: config_path.into(),
+            target_name: target_name.into(),
+            out_dir: out_dir.into(),
+        }
+    }
+
+    pub fn config_path(&self) -> &Path {
+        &self.config_path
+    }
+
+    pub fn target_name(&self) -> &str {
+        &self.target_name
+    }
+
+    pub fn out_dir(&self) -> &Path {
+        &self.out_dir
     }
 }
 
@@ -352,6 +414,8 @@ pub enum NativeModuleBuildError {
     EmptyGeneratedAt,
     #[error("module macro path must not be empty")]
     EmptyModuleMacroPath,
+    #[error("missing native target {0}")]
+    MissingNativeTarget(String),
     #[error(
         "failed to parse i18n message for locale {locale} key {key}: {message} at {line}:{column}"
     )]
@@ -548,7 +612,6 @@ pub fn build_native_module(
             runtime_output.supported_locales(),
             &generated_message_keys,
             runtime_output.default_message_metadata(),
-            options.artifact_dir_name(),
             options.module_macro_path(),
         )?,
     )?;
@@ -569,6 +632,23 @@ pub fn build_native_module(
         generated_module_path,
         generated_catalog_path,
     })
+}
+
+pub fn build_native_module_for_cargo(
+    options: &CargoNativeModuleBuildOptions,
+) -> Result<NativeModuleBuildOutput, NativeModuleBuildError> {
+    let project = ProjectLayout::load_or_default(options.config_path())?;
+    let target = project
+        .config()
+        .native
+        .target(options.target_name())
+        .ok_or_else(|| NativeModuleBuildError::MissingNativeTarget(options.target_name.clone()))?;
+
+    build_native_module(&NativeModuleBuildOptions::from_target_config(
+        project.config_path(),
+        options.out_dir(),
+        target,
+    ))
 }
 
 fn validate_options(options: &NativeModuleBuildOptions) -> Result<(), NativeModuleBuildError> {
@@ -659,15 +739,12 @@ fn render_generated_module(
     supported_locales: &[String],
     generated_message_keys: &[GeneratedMessageKey],
     message_metadata: &[MessageMetadata],
-    artifact_dir_name: &str,
     module_macro_path: &str,
 ) -> Result<String, NativeModuleBuildError> {
     let packs_source = supported_locales
         .iter()
         .map(|locale| {
-            format!(
-                "            ({locale:?}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{PACKS_DIR}/{locale}.mf2pack\"))),"
-            )
+            format!("            ({locale:?}, include_bytes!(\"{PACKS_DIR}/{locale}.mf2pack\")),")
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -709,7 +786,7 @@ fn render_generated_module(
     }
 
     Ok(format!(
-        "mod generated {{\n    {module_macro_path} {{\n        init_policy: strict,\n        default_locale: {default_locale:?},\n        id_map_json: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{ID_MAP_JSON_FILE}\")),\n        id_map_hash: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{ID_MAP_HASH_FILE}\")),\n        packs: [\n{packs_source}\n        ],\n    }}\n}}\n\n#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]\npub enum MessageKey {{\n{key_variants}\n}}\n\nimpl MessageKey {{\n    pub const ALL: &'static [Self] = &[\n{all_key_values}\n    ];\n\n    pub const fn id(self) -> &'static str {{\n        match self {{\n{key_id_matches}\n        }}\n    }}\n}}\n\nimpl ::core::fmt::Display for MessageKey {{\n    fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {{\n        formatter.write_str(self.id())\n    }}\n}}\n\nimpl mf2_i18n::I18nMessageKey for MessageKey {{\n    fn id(self) -> &'static str {{\n        MessageKey::id(self)\n    }}\n}}\n\npub const DEFAULT_LOCALE: &str = {default_locale:?};\npub const SUPPORTED_LOCALES: &[&str] = &[{supported_locale_values}];\npub const DEFAULT_CATALOG_KEYS: &[MessageKey] = MessageKey::ALL;\n\npub fn localizer() -> &'static mf2_i18n::NativeLocalizer {{\n    generated::localizer()\n}}\n\npub fn set_preferred_locales(preferred_locales: &[&str]) -> mf2_i18n::NativeResult<String> {{\n    generated::set_preferred_locales(preferred_locales)\n}}\n\npub fn set_locale(locale: &str) -> mf2_i18n::NativeResult<String> {{\n    generated::set_locale(locale)\n}}\n\npub fn negotiate_locale(preferred_locales: &[&str]) -> mf2_i18n::NativeResult<String> {{\n    generated::negotiate_locale(preferred_locales)\n}}\n\npub fn locale() -> String {{\n    generated::locale()\n}}\n\npub fn try_t(key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    generated::tr(key.id())\n}}\n\npub fn t(key: MessageKey) -> String {{\n    try_t(key).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_or_key(key: MessageKey) -> String {{\n    generated::tr_or_key(key.id())\n}}\n\npub fn try_t_locale(locale: &str, key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_locale(locale, key.id())\n}}\n\npub fn t_locale(locale: &str, key: MessageKey) -> String {{\n    try_t_locale(locale, key).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_locale_or_key(locale: &str, key: MessageKey) -> String {{\n    generated::tr_locale_or_key(locale, key.id())\n}}\n\npub fn try_t_with_args(key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_with_args(key.id(), args)\n}}\n\npub fn t_with_args(key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    try_t_with_args(key, args).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_with_args_or_key(key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    generated::tr_with_args_or_key(key.id(), args)\n}}\n\npub fn try_t_with_args_locale(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_with_args_locale(locale, key.id(), args)\n}}\n\npub fn t_with_args_locale(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    try_t_with_args_locale(locale, key, args).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_with_args_locale_or_key(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    generated::tr_with_args_locale_or_key(locale, key.id(), args)\n}}\n"
+        "mod generated {{\n    {module_macro_path} {{\n        init_policy: strict,\n        default_locale: {default_locale:?},\n        id_map_json: include_bytes!(\"{ID_MAP_JSON_FILE}\"),\n        id_map_hash: include_bytes!(\"{ID_MAP_HASH_FILE}\"),\n        packs: [\n{packs_source}\n        ],\n    }}\n}}\n\n#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]\npub enum MessageKey {{\n{key_variants}\n}}\n\nimpl MessageKey {{\n    pub const ALL: &'static [Self] = &[\n{all_key_values}\n    ];\n\n    pub const fn id(self) -> &'static str {{\n        match self {{\n{key_id_matches}\n        }}\n    }}\n}}\n\nimpl ::core::fmt::Display for MessageKey {{\n    fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {{\n        formatter.write_str(self.id())\n    }}\n}}\n\nimpl mf2_i18n::I18nMessageKey for MessageKey {{\n    fn id(self) -> &'static str {{\n        MessageKey::id(self)\n    }}\n}}\n\npub const DEFAULT_LOCALE: &str = {default_locale:?};\npub const SUPPORTED_LOCALES: &[&str] = &[{supported_locale_values}];\npub const DEFAULT_CATALOG_KEYS: &[MessageKey] = MessageKey::ALL;\n\npub fn localizer() -> &'static mf2_i18n::NativeLocalizer {{\n    generated::localizer()\n}}\n\npub fn set_preferred_locales(preferred_locales: &[&str]) -> mf2_i18n::NativeResult<String> {{\n    generated::set_preferred_locales(preferred_locales)\n}}\n\npub fn set_locale(locale: &str) -> mf2_i18n::NativeResult<String> {{\n    generated::set_locale(locale)\n}}\n\npub fn negotiate_locale(preferred_locales: &[&str]) -> mf2_i18n::NativeResult<String> {{\n    generated::negotiate_locale(preferred_locales)\n}}\n\npub fn locale() -> String {{\n    generated::locale()\n}}\n\npub fn try_t(key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    generated::tr(key.id())\n}}\n\npub fn t(key: MessageKey) -> String {{\n    try_t(key).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_or_key(key: MessageKey) -> String {{\n    generated::tr_or_key(key.id())\n}}\n\npub fn try_t_locale(locale: &str, key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_locale(locale, key.id())\n}}\n\npub fn t_locale(locale: &str, key: MessageKey) -> String {{\n    try_t_locale(locale, key).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_locale_or_key(locale: &str, key: MessageKey) -> String {{\n    generated::tr_locale_or_key(locale, key.id())\n}}\n\npub fn try_t_with_args(key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_with_args(key.id(), args)\n}}\n\npub fn t_with_args(key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    try_t_with_args(key, args).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_with_args_or_key(key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    generated::tr_with_args_or_key(key.id(), args)\n}}\n\npub fn try_t_with_args_locale(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_with_args_locale(locale, key.id(), args)\n}}\n\npub fn t_with_args_locale(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    try_t_with_args_locale(locale, key, args).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_with_args_locale_or_key(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    generated::tr_with_args_locale_or_key(locale, key.id(), args)\n}}\n"
     ) + &typed_args_source
         + &typed_helpers_source)
 }
@@ -915,8 +992,9 @@ fn render_generated_catalog(
 #[cfg(test)]
 mod tests {
     use super::{
-        GENERATED_CATALOG_FILE, NativeModuleBuildError, NativeModuleBuildOptions,
-        ProjectRuntimeBuildOptions, build_native_module, build_project_runtime_artifacts,
+        CargoNativeModuleBuildOptions, GENERATED_CATALOG_FILE, NativeModuleBuildError,
+        NativeModuleBuildOptions, ProjectRuntimeBuildOptions, build_native_module,
+        build_native_module_for_cargo, build_project_runtime_artifacts,
         render_generated_args_struct,
     };
     use crate::generated_keys::{GeneratedKeyError, GeneratedMessageKey};
@@ -1092,7 +1170,8 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         let generated_module =
             fs::read_to_string(output.generated_module_path()).expect("generated module");
         assert!(generated_module.contains("mf2_i18n::define_i18n_module!"));
-        assert!(generated_module.contains("/app_i18n/packs/en.mf2pack"));
+        assert!(generated_module.contains("include_bytes!(\"packs/en.mf2pack\")"));
+        assert!(!generated_module.contains("env!(\"OUT_DIR\")"));
         assert!(generated_module.contains("pub enum MessageKey"));
         assert!(generated_module.contains("CommonHomeTitle"));
         assert!(generated_module.contains("pub const DEFAULT_LOCALE: &str = \"en\""));
@@ -1112,6 +1191,83 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         assert!(generated_catalog.contains("\"fr\""));
         assert!(generated_catalog.contains("\"common.home.title\""));
         assert!(generated_catalog.contains("(\"common.home.title\", \"CommonHomeTitle\")"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn builds_native_module_for_cargo_target() {
+        let root = temp_dir("cargo_target");
+        let locales_root = root.join("locales");
+        let english_dir = locales_root.join("en");
+        let french_dir = locales_root.join("fr");
+        fs::create_dir_all(&english_dir).expect("english locale dir");
+        fs::create_dir_all(&french_dir).expect("french locale dir");
+        write_catalog(&english_dir.join("common.json"), &[("home.title", "Hi")]);
+        write_catalog(&english_dir.join("admin.json"), &[("panel.title", "Admin")]);
+        write_catalog(&french_dir.join("common.json"), &[("home.title", "Salut")]);
+        write_catalog(&french_dir.join("admin.json"), &[("panel.title", "Admin")]);
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[native.targets]]\nname = \"app\"\nout_dir = \"generated/native\"\nmodule_name = \"app_i18n\"\nrelease_id = \"cargo-target\"\ngenerated_at = \"2026-02-01T00:00:00Z\"\nlocales = [\"en\"]\nnamespaces = [\"common\"]\n",
+        )
+        .expect("config");
+
+        let cargo_out_dir = root.join("cargo-out");
+        let output = build_native_module_for_cargo(&CargoNativeModuleBuildOptions::new(
+            &config_path,
+            "app",
+            &cargo_out_dir,
+        ))
+        .expect("build");
+
+        assert_eq!(output.artifact_dir(), cargo_out_dir.join("app_i18n"));
+        assert_eq!(output.supported_locales(), &["en".to_string()]);
+        assert_eq!(
+            output.default_catalog_keys(),
+            &["common.home.title".to_string()]
+        );
+        assert!(output.packs_dir().join("en.mf2pack").exists());
+        assert!(!output.packs_dir().join("fr.mf2pack").exists());
+
+        let platform_bundle = PlatformBundle::load(output.platform_bundle_path()).expect("bundle");
+        assert_eq!(
+            platform_bundle.runtime_manifest().release_id,
+            "cargo-target"
+        );
+
+        let generated_module =
+            fs::read_to_string(output.generated_module_path()).expect("generated module");
+        assert!(generated_module.contains("include_bytes!(\"id-map.json\")"));
+        assert!(generated_module.contains("include_bytes!(\"id-map.sha256\")"));
+        assert!(generated_module.contains("include_bytes!(\"packs/en.mf2pack\")"));
+        assert!(!generated_module.contains("env!(\"OUT_DIR\")"));
+        assert!(generated_module.contains("CommonHomeTitle"));
+        assert!(!generated_module.contains("AdminPanelTitle"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cargo_target_build_rejects_missing_native_target() {
+        let root = temp_dir("cargo_missing_target");
+        let config_path = write_project_fixture(&root);
+
+        let err = build_native_module_for_cargo(&CargoNativeModuleBuildOptions::new(
+            &config_path,
+            "missing",
+            root.join("cargo-out"),
+        ))
+        .expect_err("target should fail");
+
+        assert!(matches!(
+            err,
+            NativeModuleBuildError::MissingNativeTarget(target) if target == "missing"
+        ));
 
         fs::remove_dir_all(&root).ok();
     }
@@ -1349,12 +1505,13 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
             fs::read_to_string(output.generated_module_path()).expect("generated module");
         assert!(generated_module.contains("AdminPanelTitle"));
         assert!(generated_module.contains("CommonHomeTitle"));
-        assert!(generated_module.contains("/app_i18n/packs/en.mf2pack"));
-        assert!(generated_module.contains("/app_i18n/packs/es.mf2pack"));
-        assert!(!generated_module.contains("/app_i18n/packs/fr.mf2pack"));
+        assert!(generated_module.contains("include_bytes!(\"packs/en.mf2pack\")"));
+        assert!(generated_module.contains("include_bytes!(\"packs/es.mf2pack\")"));
+        assert!(!generated_module.contains("packs/fr.mf2pack"));
         assert!(
             generated_module.contains("pub const SUPPORTED_LOCALES: &[&str] = &[\"en\", \"es\"]")
         );
+        assert!(!generated_module.contains("env!(\"OUT_DIR\")"));
 
         fs::remove_dir_all(&root).ok();
     }

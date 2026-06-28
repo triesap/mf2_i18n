@@ -2,3 +2,8 @@ version = 1
 default_locale = "en"
 source_dirs = ["locales"]
 project_salt_path = "id_salt.txt"
+
+[[native.targets]]
+name = "app-native"
+out_dir = "target/mf2/native"
+module_name = "app_i18n"

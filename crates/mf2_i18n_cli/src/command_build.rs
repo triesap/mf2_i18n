@@ -34,32 +34,8 @@ pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
         .out_dir
         .clone()
         .unwrap_or_else(|| target.resolve_out_dir(project.config_path()));
-    let mut build_options =
-        NativeModuleBuildOptions::new(&options.config_path, out_dir, &target.module_name);
-
-    if !target.locales.is_empty() {
-        build_options = build_options.with_locales(target.locales.clone());
-    }
-
-    if !target.namespaces.is_empty() {
-        build_options = build_options.with_namespaces(target.namespaces.clone());
-    }
-
-    if let Some(module_macro_path) = target.module_macro_path() {
-        build_options = build_options.with_module_macro_path(module_macro_path);
-    }
-
-    if target.release_id.is_some() || target.generated_at.is_some() {
-        let release_id = target
-            .release_id
-            .clone()
-            .unwrap_or_else(|| build_options.release_id().to_string());
-        let generated_at = target
-            .generated_at
-            .clone()
-            .unwrap_or_else(|| build_options.generated_at().to_string());
-        build_options = build_options.with_release_metadata(release_id, generated_at);
-    }
+    let build_options =
+        NativeModuleBuildOptions::from_target_config(&options.config_path, out_dir, target);
 
     build_native_module(&build_options)?;
     Ok(())
@@ -203,9 +179,10 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         assert!(
             generated_module.contains("pub const SUPPORTED_LOCALES: &[&str] = &[\"en\", \"es\"]")
         );
-        assert!(generated_module.contains("/app_i18n/packs/en.mf2pack"));
-        assert!(generated_module.contains("/app_i18n/packs/es.mf2pack"));
-        assert!(!generated_module.contains("/app_i18n/packs/fr.mf2pack"));
+        assert!(generated_module.contains("include_bytes!(\"packs/en.mf2pack\")"));
+        assert!(generated_module.contains("include_bytes!(\"packs/es.mf2pack\")"));
+        assert!(!generated_module.contains("packs/fr.mf2pack"));
+        assert!(!generated_module.contains("env!(\"OUT_DIR\")"));
 
         fs::remove_dir_all(&dir).ok();
     }
