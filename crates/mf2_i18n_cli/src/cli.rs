@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::command_build::{BuildCommandError, BuildOptions, run_build};
+use crate::command_build_leptos::{BuildLeptosCommandError, BuildLeptosOptions, run_build_leptos};
 use crate::command_build_web::{BuildWebCommandError, BuildWebOptions, run_build_web};
 use crate::command_coverage::{CoverageCommandError, CoverageOptions, run_coverage};
 use crate::command_detect::{DetectOptions, run_detect};
@@ -28,6 +29,8 @@ pub enum CliAppError {
     Validate(#[from] ValidateCommandError),
     #[error(transparent)]
     Build(#[from] BuildCommandError),
+    #[error(transparent)]
+    BuildLeptos(#[from] BuildLeptosCommandError),
     #[error(transparent)]
     BuildWeb(#[from] BuildWebCommandError),
     #[error(transparent)]
@@ -66,6 +69,11 @@ pub fn run_args(raw_args: Vec<String>) -> Result<(), CliAppError> {
         "build-native" => {
             let options = parse_build_options(args.collect())?;
             run_build(&options)?;
+            Ok(())
+        }
+        "build-leptos" => {
+            let options = parse_build_leptos_options(args.collect())?;
+            run_build_leptos(&options)?;
             Ok(())
         }
         "build" => {
@@ -147,6 +155,7 @@ fn error_diagnostic(error: &CliAppError) -> Diagnostic {
         CliAppError::Extract(_) => command_error("MF2CLI_EXTRACT", error),
         CliAppError::Validate(_) => command_error("MF2CLI_VALIDATE", error),
         CliAppError::Build(_) => command_error("MF2CLI_BUILD", error),
+        CliAppError::BuildLeptos(_) => command_error("MF2CLI_BUILD_LEPTOS", error),
         CliAppError::BuildWeb(_) => command_error("MF2CLI_BUILD_WEB", error),
         CliAppError::Sign(_) => command_error("MF2CLI_SIGN", error),
         CliAppError::Pseudo(_) => command_error("MF2CLI_PSEUDO", error),
@@ -224,7 +233,7 @@ fn usage() -> String {
         ""
     };
     format!(
-        "usage: mf2_i18n_cli init [--preset <name>] [--source-layout <name>] [--target <name>] [--config <path>] [--json]\n       mf2_i18n_cli detect [--cwd <path>] [--json]\n       mf2_i18n_cli build --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli check --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli scaffold missing --source <name> --locale <locale> [--config <path>] [--json]\n       mf2_i18n_cli doctor [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check]{dto_flag} [--json]\n       mf2_i18n_cli build-native --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]"
+        "usage: mf2_i18n_cli init [--preset <name>] [--source-layout <name>] [--target <name>] [--config <path>] [--json]\n       mf2_i18n_cli detect [--cwd <path>] [--json]\n       mf2_i18n_cli build --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli check --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli scaffold missing --source <name> --locale <locale> [--config <path>] [--json]\n       mf2_i18n_cli doctor [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check]{dto_flag} [--json]\n       mf2_i18n_cli build-native --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli build-leptos --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]"
     )
 }
 
@@ -269,6 +278,28 @@ fn parse_build_options(args: Vec<String>) -> Result<BuildOptions, CliAppError> {
     }
     let target_name = target_name.ok_or_else(|| CliAppError::Usage(usage()))?;
     Ok(BuildOptions {
+        config_path,
+        target_name,
+        out_dir,
+    })
+}
+
+fn parse_build_leptos_options(args: Vec<String>) -> Result<BuildLeptosOptions, CliAppError> {
+    let mut target_name = None;
+    let mut out_dir = None;
+    let mut config_path = PathBuf::from("mf2_i18n.toml");
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--target" => target_name = Some(next_value("--target", &mut iter)?),
+            "--out" => out_dir = Some(PathBuf::from(next_value("--out", &mut iter)?)),
+            "--config" => config_path = PathBuf::from(next_value("--config", &mut iter)?),
+            "--help" | "-h" => return Err(CliAppError::Usage(usage())),
+            _ => return Err(CliAppError::Usage(usage())),
+        }
+    }
+    let target_name = target_name.ok_or_else(|| CliAppError::Usage(usage()))?;
+    Ok(BuildLeptosOptions {
         config_path,
         target_name,
         out_dir,
@@ -497,11 +528,11 @@ fn parse_export_web_json_options(args: Vec<String>) -> Result<ExportWebJsonOptio
 #[cfg(test)]
 mod tests {
     use super::{
-        CliAppError, parse_build_options, parse_build_web_options, parse_coverage_options,
-        parse_detect_options, parse_doctor_options, parse_export_web_json_options,
-        parse_extract_options, parse_init_options, parse_pseudo_options,
-        parse_scaffold_missing_options, parse_sign_options, parse_validate_options,
-        render_error_json, run_args, strip_json_flag,
+        CliAppError, parse_build_leptos_options, parse_build_options, parse_build_web_options,
+        parse_coverage_options, parse_detect_options, parse_doctor_options,
+        parse_export_web_json_options, parse_extract_options, parse_init_options,
+        parse_pseudo_options, parse_scaffold_missing_options, parse_sign_options,
+        parse_validate_options, render_error_json, run_args, strip_json_flag,
     };
     use mf2_i18n_build::WebJsonMode;
 
@@ -543,6 +574,19 @@ mod tests {
         let options = parse_build_options(args).expect("options");
         assert_eq!(options.target_name, "app");
         assert!(options.out_dir.expect("out").ends_with("generated/native"));
+    }
+
+    #[test]
+    fn parses_build_leptos_options() {
+        let args = vec![
+            "--target".to_string(),
+            "app".to_string(),
+            "--out".to_string(),
+            "generated/leptos".to_string(),
+        ];
+        let options = parse_build_leptos_options(args).expect("options");
+        assert_eq!(options.target_name, "app");
+        assert!(options.out_dir.expect("out").ends_with("generated/leptos"));
     }
 
     #[test]

@@ -225,16 +225,12 @@ sync_html_lang = true
         std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("out dir"));
     let config_path = manifest_dir.join("mf2_i18n.toml");
-    let output = mf2_i18n::build_native_module_for_cargo(
-        &mf2_i18n::CargoNativeModuleBuildOptions::new(
-            &config_path,
-            "app-native",
-            &out_dir,
-        ),
+    let output = mf2_i18n::build_leptos_target(
+        &mf2_i18n::LeptosTargetBuildOptions::new(&config_path, "app").with_out_dir(&out_dir),
     )
-    .expect("native module");
+    .expect("leptos target");
 
-    for path in output.rerun_if_changed_paths() {
+    for path in output.native_output().rerun_if_changed_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
 }
@@ -242,7 +238,7 @@ sync_html_lang = true
     );
     write_file(
         &fixture_dir.join("src/lib.rs"),
-        r#"include!(concat!(env!("OUT_DIR"), "/app_i18n/generated_module.rs"));
+        r#"include!(concat!(env!("OUT_DIR"), "/app_i18n.rs"));
 
 #[cfg(test)]
 mod tests {
@@ -251,7 +247,10 @@ mod tests {
     use leptos::prelude::Owner;
     use mf2_i18n::leptos::{I18nDocument, RichTextMessage, RichTextPart, RichTextRenderNode};
 
-    use super::{HomepageWelcomeArgs, MessageKey, localizer, t_homepage_title, t_homepage_welcome};
+    use super::{
+        HomepageWelcomeArgs, LEPTOS_MODULE_NAME, MessageKey, leptos_document_title_key,
+        leptos_sync_html_lang, localizer, t_homepage_title, t_homepage_welcome,
+    };
 
     #[derive(Clone, Default)]
     struct RecordingDocument {
@@ -273,6 +272,9 @@ mod tests {
     fn generated_native_helpers_format_homepage_text() {
         let args = HomepageWelcomeArgs::new("Nova");
 
+        assert_eq!(LEPTOS_MODULE_NAME, "app_i18n");
+        assert_eq!(leptos_document_title_key(), Some(MessageKey::HomepageTitle));
+        assert!(leptos_sync_html_lang());
         assert_eq!(t_homepage_title(), "Radroots");
         assert_eq!(t_homepage_welcome(&args), "Welcome Nova");
     }

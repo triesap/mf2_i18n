@@ -2,6 +2,7 @@
 
 mod cli;
 mod command_build;
+mod command_build_leptos;
 mod command_build_web;
 mod command_coverage;
 mod command_detect;

@@ -50,6 +50,7 @@ pub fn run_init(options: &InitOptions) -> Result<InitReport, InitCommandError> {
     write_starter_locale(config_root, options)?;
     write_project_salt(config_root)?;
     write_generated_ignore(config_root, options)?;
+    write_leptos_build_script(config_root, options)?;
     if let Some(package_root) = package_root.as_deref() {
         update_package_scripts(package_root, options)?;
     }
@@ -170,6 +171,28 @@ fn write_generated_ignore(
     Ok(())
 }
 
+fn write_leptos_build_script(
+    project_root: &Path,
+    options: &InitOptions,
+) -> Result<(), InitCommandError> {
+    if !is_leptos_preset(&options.preset) {
+        return Ok(());
+    }
+    let build_script_path = project_root.join("build.rs");
+    if build_script_path.exists() {
+        return Ok(());
+    }
+    let config_path = package_script_config_path(project_root, &options.config_path);
+    fs::write(
+        build_script_path,
+        format!(
+            "fn main() {{\n    let manifest_dir =\n        std::path::PathBuf::from(std::env::var(\"CARGO_MANIFEST_DIR\").expect(\"manifest dir\"));\n    let out_dir = std::path::PathBuf::from(std::env::var(\"OUT_DIR\").expect(\"out dir\"));\n    let config_path = manifest_dir.join({config_path:?});\n    let output = mf2_i18n::build_leptos_target(\n        &mf2_i18n::LeptosTargetBuildOptions::new(&config_path, {target_name:?})\n            .with_out_dir(&out_dir),\n    )\n    .expect(\"leptos target\");\n\n    for path in output.native_output().rerun_if_changed_paths() {{\n        println!(\"cargo:rerun-if-changed={{}}\", path.display());\n    }}\n}}\n",
+            target_name = options.target_name
+        ),
+    )?;
+    Ok(())
+}
+
 fn find_package_root(config_root: &Path) -> Option<PathBuf> {
     for ancestor in config_root.ancestors() {
         if ancestor.join("package.json").exists() {
@@ -223,8 +246,8 @@ fn update_package_scripts(
 fn mf2_gen_script(config_path: &str, options: &InitOptions) -> String {
     if is_leptos_preset(&options.preset) {
         format!(
-            "mf2-i18n build-native --config {config_path} --target {}",
-            native_target_name(options)
+            "mf2-i18n build-leptos --config {config_path} --target {}",
+            options.target_name
         )
     } else {
         format!(
@@ -379,13 +402,14 @@ mod tests {
         assert!(!contents.contains("typescript = true"));
         assert!(dir.join("locales/en/app.mf2").exists());
         assert!(dir.join("src/generated/i18n/.gitignore").exists());
+        assert!(dir.join("build.rs").exists());
         assert!(!dir.join("src/generated/mf2/.gitignore").exists());
 
         fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
-    fn leptos_package_script_uses_native_build_target() {
+    fn leptos_package_script_uses_leptos_build_target() {
         let dir = temp_dir();
         fs::write(dir.join("package.json"), "{}").expect("package");
         let config_path = dir.join("mf2_i18n.toml");
@@ -399,7 +423,7 @@ mod tests {
 
         let package = fs::read_to_string(dir.join("package.json")).expect("read");
         assert!(package.contains(
-            "\"mf2:gen\": \"mf2-i18n build-native --config mf2_i18n.toml --target app-native\""
+            "\"mf2:gen\": \"mf2-i18n build-leptos --config mf2_i18n.toml --target app\""
         ));
         assert!(!package.contains("mf2:check"));
         assert!(!package.contains("build-web"));
