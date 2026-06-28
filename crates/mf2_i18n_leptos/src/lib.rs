@@ -1,8 +1,51 @@
 #![forbid(unsafe_code)]
 
-use leptos::prelude::{Get, RwSignal, Set, provide_context, use_context};
+use leptos::prelude::{Effect, Get, LocalStorage, RwSignal, Set, provide_context, use_context};
 pub use mf2_i18n_core::{Args, I18nMessageKey, RichTextMessage, RichTextPart};
 pub use mf2_i18n_native::{NativeError, NativeLocalizer, NativeResult};
+
+pub type I18nEffect = Effect<LocalStorage>;
+
+pub trait I18nDocument: Clone + 'static {
+    fn set_title(&self, title: &str);
+
+    fn set_html_lang(&self, lang: &str);
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct BrowserI18nDocument;
+
+impl I18nDocument for BrowserI18nDocument {
+    fn set_title(&self, title: &str) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            leptos::prelude::document().set_title(title);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = title;
+        }
+    }
+
+    fn set_html_lang(&self, lang: &str) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(element) = leptos::prelude::document().document_element() {
+                let _ = element.set_attribute("lang", lang);
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = lang;
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RichTextRenderNode<TSlot> {
+    Text(String),
+    Slot { name: String, value: TSlot },
+}
 
 #[derive(Clone)]
 pub struct I18nContext {
@@ -125,6 +168,64 @@ impl I18nContext {
         let context = self.clone();
         move || context.text_or_key(key)
     }
+
+    pub fn update_document_title<K>(&self, key: K)
+    where
+        K: I18nMessageKey,
+    {
+        self.update_document_title_with(key, BrowserI18nDocument);
+    }
+
+    pub fn update_document_title_with<K, D>(&self, key: K, document: D)
+    where
+        K: I18nMessageKey,
+        D: I18nDocument,
+    {
+        document.set_title(&self.text_or_key(key));
+    }
+
+    pub fn sync_document_title<K>(&self, key: K) -> I18nEffect
+    where
+        K: I18nMessageKey,
+    {
+        self.sync_document_title_with(key, BrowserI18nDocument)
+    }
+
+    pub fn sync_document_title_with<K, D>(&self, key: K, document: D) -> I18nEffect
+    where
+        K: I18nMessageKey,
+        D: I18nDocument,
+    {
+        let context = self.clone();
+        Effect::new(move || {
+            context.update_document_title_with(key, document.clone());
+        })
+    }
+
+    pub fn update_html_lang(&self) {
+        self.update_html_lang_with(BrowserI18nDocument);
+    }
+
+    pub fn update_html_lang_with<D>(&self, document: D)
+    where
+        D: I18nDocument,
+    {
+        document.set_html_lang(&self.locale());
+    }
+
+    pub fn sync_html_lang(&self) -> I18nEffect {
+        self.sync_html_lang_with(BrowserI18nDocument)
+    }
+
+    pub fn sync_html_lang_with<D>(&self, document: D) -> I18nEffect
+    where
+        D: I18nDocument,
+    {
+        let context = self.clone();
+        Effect::new(move || {
+            context.update_html_lang_with(document.clone());
+        })
+    }
 }
 
 pub fn provide_i18n(localizer: &'static NativeLocalizer) -> I18nContext {
@@ -193,12 +294,43 @@ where
     use_i18n().text_or_key_signal(key)
 }
 
+pub fn sync_document_title<K>(key: K) -> I18nEffect
+where
+    K: I18nMessageKey,
+{
+    use_i18n().sync_document_title(key)
+}
+
+pub fn sync_html_lang() -> I18nEffect {
+    use_i18n().sync_html_lang()
+}
+
+pub fn render_rich_text<TSlot>(
+    message: &RichTextMessage,
+    mut slot: impl FnMut(&str) -> TSlot,
+) -> Vec<RichTextRenderNode<TSlot>> {
+    message
+        .parts()
+        .iter()
+        .map(|part| match part {
+            RichTextPart::Text(value) => RichTextRenderNode::Text(value.clone()),
+            RichTextPart::Slot { name } => RichTextRenderNode::Slot {
+                name: name.clone(),
+                value: slot(name),
+            },
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, RwLock};
+
     use leptos::prelude::{Get, Owner};
 
     use super::{
-        I18nMessageKey, NativeLocalizer, provide_i18n, provide_i18n_with_locale, text_or_key,
+        I18nDocument, I18nMessageKey, NativeLocalizer, RichTextMessage, RichTextPart,
+        RichTextRenderNode, provide_i18n, provide_i18n_with_locale, render_rich_text, text_or_key,
         try_text, try_use_i18n, use_i18n,
     };
 
@@ -217,6 +349,22 @@ mod tests {
 
     fn test_localizer() -> &'static NativeLocalizer {
         Box::leak(Box::new(NativeLocalizer::fallback("en")))
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingDocument {
+        title: Arc<RwLock<Vec<String>>>,
+        lang: Arc<RwLock<Vec<String>>>,
+    }
+
+    impl I18nDocument for RecordingDocument {
+        fn set_title(&self, title: &str) {
+            self.title.write().expect("title").push(title.to_string());
+        }
+
+        fn set_html_lang(&self, lang: &str) {
+            self.lang.write().expect("lang").push(lang.to_string());
+        }
     }
 
     #[test]
@@ -260,5 +408,64 @@ mod tests {
             assert_eq!(text(), "home.title");
             assert_eq!(context.locale_signal().get(), "fr");
         });
+    }
+
+    #[test]
+    fn document_update_helpers_use_context_text_and_locale() {
+        Owner::new().with(|| {
+            let context = provide_i18n(test_localizer());
+            let document = RecordingDocument::default();
+
+            context.update_document_title_with(TestKey::HomeTitle, document.clone());
+            context.set_locale("fr").expect("locale");
+            context.update_html_lang_with(document.clone());
+
+            assert_eq!(
+                document.title.read().expect("title").as_slice(),
+                ["home.title"]
+            );
+            assert_eq!(document.lang.read().expect("lang").as_slice(), ["fr"]);
+        });
+    }
+
+    #[test]
+    fn document_sync_helpers_compile_against_owner_context() {
+        Owner::new().with(|| {
+            let context = provide_i18n(test_localizer());
+            let document = RecordingDocument::default();
+
+            let _title = context.sync_document_title_with(TestKey::HomeTitle, document.clone());
+            let _lang = context.sync_html_lang_with(document);
+        });
+    }
+
+    #[test]
+    fn rich_text_rendering_preserves_named_slot_order() {
+        let message = RichTextMessage::new(vec![
+            RichTextPart::text("Use "),
+            RichTextPart::slot("ios"),
+            RichTextPart::text(" or "),
+            RichTextPart::slot("android"),
+            RichTextPart::text("."),
+        ]);
+
+        let rendered = render_rich_text(&message, |name| format!("<{name}>"));
+
+        assert_eq!(
+            rendered,
+            vec![
+                RichTextRenderNode::Text("Use ".to_string()),
+                RichTextRenderNode::Slot {
+                    name: "ios".to_string(),
+                    value: "<ios>".to_string(),
+                },
+                RichTextRenderNode::Text(" or ".to_string()),
+                RichTextRenderNode::Slot {
+                    name: "android".to_string(),
+                    value: "<android>".to_string(),
+                },
+                RichTextRenderNode::Text(".".to_string()),
+            ]
+        );
     }
 }
