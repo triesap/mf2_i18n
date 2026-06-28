@@ -15,6 +15,13 @@ pub struct MessageMetadata {
     pub source_path: String,
     pub source_line: Option<u32>,
     pub args: Vec<MessageArg>,
+    pub rich_slots: Vec<String>,
+}
+
+impl MessageMetadata {
+    pub fn needs_rich_text(&self) -> bool {
+        !self.rich_slots.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +74,12 @@ pub fn infer_message_args(message: &Message) -> Vec<MessageArg> {
         .collect()
 }
 
+pub fn infer_rich_slots(message: &Message) -> Vec<String> {
+    let mut slots = Vec::new();
+    infer_segments_rich_slots(&message.segments, &mut slots);
+    slots
+}
+
 fn metadata_for_message(
     locale: &str,
     message: &ProjectCatalogMessage,
@@ -86,6 +99,7 @@ fn metadata_for_message(
         source_path: message.source_path.to_string_lossy().into_owned(),
         source_line: message.line,
         args: infer_message_args(&parsed),
+        rich_slots: infer_rich_slots(&parsed),
     })
 }
 
@@ -120,6 +134,33 @@ fn infer_select(select: &SelectExpr, args: &mut BTreeMap<String, ArgType>) {
     }
 }
 
+fn infer_segments_rich_slots(segments: &[Segment], slots: &mut Vec<String>) {
+    for segment in segments {
+        match segment {
+            Segment::Text { .. } => {}
+            Segment::Expr(Expr::Variable(var)) => infer_variable_rich_slot(var, slots),
+            Segment::Expr(Expr::Select(select)) => infer_select_rich_slots(select, slots),
+        }
+    }
+}
+
+fn infer_variable_rich_slot(var: &VarExpr, slots: &mut Vec<String>) {
+    if var
+        .formatter
+        .as_ref()
+        .is_some_and(|formatter| formatter.name == "slot")
+        && !slots.contains(&var.name)
+    {
+        slots.push(var.name.clone());
+    }
+}
+
+fn infer_select_rich_slots(select: &SelectExpr, slots: &mut Vec<String>) {
+    for case in &select.cases {
+        infer_segments_rich_slots(&case.value.segments, slots);
+    }
+}
+
 fn merge_arg(args: &mut BTreeMap<String, ArgType>, name: &str, arg_type: ArgType) {
     args.entry(name.to_owned())
         .and_modify(|existing| {
@@ -137,6 +178,7 @@ fn formatter_arg_type(formatter: &str) -> ArgType {
         "date" | "time" | "datetime" => ArgType::DateTime,
         "unit" => ArgType::Unit,
         "currency" => ArgType::Currency,
+        "slot" => ArgType::Any,
         "identity" => ArgType::Any,
         _ => ArgType::Any,
     }
@@ -144,7 +186,7 @@ fn formatter_arg_type(formatter: &str) -> ArgType {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_message_metadata, infer_message_args};
+    use super::{collect_message_metadata, infer_message_args, infer_rich_slots};
     use crate::model::ArgType;
     use crate::parser::parse_message;
     use crate::project_catalogs::{ProjectCatalog, ProjectCatalogMessage};
@@ -192,6 +234,7 @@ mod tests {
         assert_eq!(metadata[0].source_path, "locales/en/common.mf2");
         assert_eq!(metadata[0].source_line, Some(7));
         assert_eq!(metadata[0].args[0].name, "name");
+        assert!(!metadata[0].needs_rich_text());
     }
 
     #[test]
@@ -202,5 +245,40 @@ mod tests {
         assert_eq!(args.len(), 1);
         assert_eq!(args[0].name, "value");
         assert_eq!(args[0].arg_type, ArgType::Any);
+    }
+
+    #[test]
+    fn infers_rich_slots_from_variables_and_select_cases() {
+        let message = parse_message(
+            "Read { $terms :slot } before { $count :plural -> [one] {{ $single :slot }} *[other] {{ $many :slot }}} and { $terms :slot }.",
+        )
+        .expect("parse");
+
+        let slots = infer_rich_slots(&message);
+
+        assert_eq!(slots, vec!["terms", "single", "many"]);
+    }
+
+    #[test]
+    fn collects_rich_slots_from_message_metadata() {
+        let mut catalog = ProjectCatalog::new();
+        catalog.insert(
+            "common.notice".to_string(),
+            ProjectCatalogMessage {
+                namespace: "common".to_string(),
+                message_path: "notice".to_string(),
+                qualified_key: "common.notice".to_string(),
+                value: "{ $link :slot } is open source".to_string(),
+                source_path: PathBuf::from("locales/en/common.mf2"),
+                line: Some(11),
+            },
+        );
+
+        let metadata = collect_message_metadata("en", &catalog, None).expect("metadata");
+
+        assert!(metadata[0].needs_rich_text());
+        assert_eq!(metadata[0].rich_slots, vec!["link"]);
+        assert_eq!(metadata[0].args[0].name, "link");
+        assert_eq!(metadata[0].args[0].arg_type, ArgType::Any);
     }
 }

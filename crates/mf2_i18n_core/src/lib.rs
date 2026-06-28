@@ -16,6 +16,7 @@ mod negotiation;
 mod pack;
 mod pack_catalog;
 mod pack_decode;
+mod rich_text;
 mod types;
 
 pub use args::{ArgType, Args, DateTimeValue, Value};
@@ -37,4 +38,5 @@ pub use pack_catalog::PackCatalog;
 pub use pack_decode::{
     decode_dense_index, decode_sparse_index, decode_string_pool, read_bytecode_at,
 };
+pub use rich_text::{RichTextMessage, RichTextPart};
 pub use types::{Key, MessageId};

@@ -48,7 +48,8 @@ pub use crate::generated_keys::{
     rust_value_identifier, variant_function_suffix,
 };
 pub use crate::message_metadata::{
-    MessageArg, MessageMetadata, MessageMetadataError, collect_message_metadata, infer_message_args,
+    MessageArg, MessageMetadata, MessageMetadataError, collect_message_metadata,
+    infer_message_args, infer_rich_slots,
 };
 pub use crate::platform::{
     PlatformBundle, PlatformBundleError, PlatformBundleManifest, PlatformPack,
