@@ -133,6 +133,7 @@ fn merge_arg(args: &mut BTreeMap<String, ArgType>, name: &str, arg_type: ArgType
 fn formatter_arg_type(formatter: &str) -> ArgType {
     match formatter {
         "number" | "plural" => ArgType::Number,
+        "bool" => ArgType::Bool,
         "date" | "time" | "datetime" => ArgType::DateTime,
         "unit" => ArgType::Unit,
         "currency" => ArgType::Currency,

@@ -45,6 +45,7 @@ pub use crate::diagnostic::{Diagnostic, DiagnosticReport, DiagnosticSeverity};
 pub use crate::error::BuildIoError;
 pub use crate::generated_keys::{
     GeneratedKeyError, GeneratedMessageKey, build_generated_message_keys, message_key_variant,
+    rust_value_identifier, variant_function_suffix,
 };
 pub use crate::message_metadata::{
     MessageArg, MessageMetadata, MessageMetadataError, collect_message_metadata, infer_message_args,

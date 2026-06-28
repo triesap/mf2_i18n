@@ -26,8 +26,8 @@ pub use mf2_i18n_build::{
     collect_message_metadata, collect_web_message_metadata, export_web_json, infer_message_args,
     infer_web_message_args, load_platform_bundle_manifest, load_project_catalogs,
     load_project_config, load_project_config_or_default, message_key_variant,
-    render_web_typescript_metadata_types, resolve_config_relative_path,
-    write_platform_bundle_manifest, write_web_artifacts,
+    render_web_typescript_metadata_types, resolve_config_relative_path, rust_value_identifier,
+    variant_function_suffix, write_platform_bundle_manifest, write_web_artifacts,
 };
 pub use mf2_i18n_core::{
     ArgType, Args, CoreError, CoreResult, DateTimeValue, FormatBackend, FormatterId,

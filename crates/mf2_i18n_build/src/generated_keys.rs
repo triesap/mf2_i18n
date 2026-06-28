@@ -20,6 +20,16 @@ pub enum GeneratedKeyError {
         first_key: String,
         duplicate_key: String,
     },
+    #[error("identifier {value:?} cannot be converted to a Rust identifier: {reason}")]
+    InvalidIdentifier { value: String, reason: &'static str },
+    #[error(
+        "identifiers {first_value:?} and {duplicate_value:?} both generate Rust identifier {identifier}"
+    )]
+    IdentifierCollision {
+        identifier: String,
+        first_value: String,
+        duplicate_value: String,
+    },
 }
 
 pub fn build_generated_message_keys(
@@ -63,6 +73,44 @@ pub fn message_key_variant(key: &str) -> Result<String, GeneratedKeyError> {
     Ok(variant)
 }
 
+pub fn variant_function_suffix(variant: &str) -> String {
+    let mut output = String::new();
+    let mut previous_was_lower_or_digit = false;
+    for ch in variant.chars() {
+        if ch.is_ascii_uppercase() {
+            if previous_was_lower_or_digit {
+                output.push('_');
+            }
+            output.push(ch.to_ascii_lowercase());
+            previous_was_lower_or_digit = false;
+        } else {
+            output.push(ch);
+            previous_was_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        }
+    }
+    output
+}
+
+pub fn rust_value_identifier(value: &str) -> Result<String, GeneratedKeyError> {
+    let tokens = rust_identifier_tokens(value)?;
+    let mut identifier = tokens
+        .into_iter()
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join("_");
+    if identifier
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_digit())
+    {
+        identifier.insert_str(0, "value_");
+    }
+    if is_reserved_value_identifier(&identifier) {
+        identifier.push_str("_value");
+    }
+    Ok(identifier)
+}
+
 fn message_key_tokens(key: &str) -> Result<Vec<String>, GeneratedKeyError> {
     if key.trim().is_empty() {
         return Err(invalid_key(key, "message key must not be empty"));
@@ -93,6 +141,36 @@ fn message_key_tokens(key: &str) -> Result<Vec<String>, GeneratedKeyError> {
     Ok(tokens)
 }
 
+fn rust_identifier_tokens(value: &str) -> Result<Vec<String>, GeneratedKeyError> {
+    if value.trim().is_empty() {
+        return Err(invalid_identifier(value, "identifier must not be empty"));
+    }
+
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            current.push(ch);
+        } else if matches!(ch, '-' | '_') {
+            push_token(&mut tokens, &mut current);
+        } else {
+            return Err(invalid_identifier(
+                value,
+                "identifier must contain only ASCII letters, digits, hyphens, and underscores",
+            ));
+        }
+    }
+    push_token(&mut tokens, &mut current);
+
+    if tokens.is_empty() {
+        return Err(invalid_identifier(
+            value,
+            "identifier must contain at least one ASCII letter or digit",
+        ));
+    }
+    Ok(tokens)
+}
+
 fn push_token(tokens: &mut Vec<String>, current: &mut String) {
     if !current.is_empty() {
         tokens.push(std::mem::take(current));
@@ -114,6 +192,49 @@ fn is_reserved_variant(value: &str) -> bool {
     matches!(value, "Self" | "Super" | "Crate")
 }
 
+fn is_reserved_value_identifier(value: &str) -> bool {
+    matches!(
+        value,
+        "as" | "async"
+            | "await"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "dyn"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+    )
+}
+
 fn invalid_key(key: &str, reason: &'static str) -> GeneratedKeyError {
     GeneratedKeyError::InvalidMessageKey {
         key: key.to_owned(),
@@ -121,9 +242,19 @@ fn invalid_key(key: &str, reason: &'static str) -> GeneratedKeyError {
     }
 }
 
+fn invalid_identifier(value: &str, reason: &'static str) -> GeneratedKeyError {
+    GeneratedKeyError::InvalidIdentifier {
+        value: value.to_owned(),
+        reason,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GeneratedKeyError, build_generated_message_keys, message_key_variant};
+    use super::{
+        GeneratedKeyError, build_generated_message_keys, message_key_variant,
+        rust_value_identifier, variant_function_suffix,
+    };
 
     #[test]
     fn generated_variants_use_pascal_case_for_common_separators() {
@@ -184,5 +315,22 @@ mod tests {
                     && first_key == "common.home-title"
                     && duplicate_key == "common.home_title"
         ));
+    }
+
+    #[test]
+    fn generated_function_suffixes_use_snake_case() {
+        assert_eq!(
+            variant_function_suffix("CommonHomeTitle"),
+            "common_home_title"
+        );
+        assert_eq!(variant_function_suffix("Oauth2faStatus"), "oauth2fa_status");
+    }
+
+    #[test]
+    fn generated_value_identifiers_use_safe_snake_case() {
+        assert_eq!(rust_value_identifier("count").unwrap(), "count");
+        assert_eq!(rust_value_identifier("unit-id").unwrap(), "unit_id");
+        assert_eq!(rust_value_identifier("2fa").unwrap(), "value_2fa");
+        assert_eq!(rust_value_identifier("type").unwrap(), "type_value");
     }
 }

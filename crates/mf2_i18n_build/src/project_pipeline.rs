@@ -6,10 +6,17 @@ use thiserror::Error;
 
 use crate::artifacts::{write_id_map, write_id_map_hash};
 use crate::compiler::{CompileError, compile_message};
-use crate::generated_keys::{GeneratedKeyError, GeneratedMessageKey, build_generated_message_keys};
+use crate::generated_keys::{
+    GeneratedKeyError, GeneratedMessageKey, build_generated_message_keys, rust_value_identifier,
+    variant_function_suffix,
+};
 use crate::id_map::{IdMap, IdMapError, build_id_map};
 use crate::manifest::{Manifest, PackEntry, sha256_hex};
+use crate::message_metadata::{
+    MessageArg, MessageMetadata, MessageMetadataError, collect_message_metadata,
+};
 use crate::micro_locales::{MicroLocaleError, load_micro_locales};
+use crate::model::ArgType;
 use crate::pack_encode::{PackBuildInput, encode_pack};
 use crate::parser::parse_message;
 use crate::platform::{PlatformBundleManifest, write_platform_bundle_manifest};
@@ -177,6 +184,7 @@ pub struct ProjectRuntimeBuildOutput {
     default_locale: String,
     supported_locales: Vec<String>,
     default_catalog_keys: Vec<String>,
+    default_message_metadata: Vec<MessageMetadata>,
 }
 
 impl ProjectRuntimeBuildOutput {
@@ -218,6 +226,10 @@ impl ProjectRuntimeBuildOutput {
 
     pub fn default_catalog_keys(&self) -> &[String] {
         &self.default_catalog_keys
+    }
+
+    pub fn default_message_metadata(&self) -> &[MessageMetadata] {
+        &self.default_message_metadata
     }
 }
 
@@ -276,6 +288,10 @@ impl NativeModuleBuildOutput {
     pub fn default_catalog_keys(&self) -> &[String] {
         self.runtime_output.default_catalog_keys()
     }
+
+    pub fn default_message_metadata(&self) -> &[MessageMetadata] {
+        self.runtime_output.default_message_metadata()
+    }
 }
 
 #[derive(Debug, Error)]
@@ -288,6 +304,8 @@ pub enum NativeModuleBuildError {
     IdMap(#[from] IdMapError),
     #[error(transparent)]
     GeneratedKeys(#[from] GeneratedKeyError),
+    #[error(transparent)]
+    MessageMetadata(#[from] MessageMetadataError),
     #[error(transparent)]
     MicroLocales(#[from] MicroLocaleError),
     #[error(transparent)]
@@ -355,6 +373,8 @@ pub fn build_project_runtime_artifacts(
         .get(&default_locale)
         .ok_or_else(|| ProjectCatalogError::MissingDefaultLocale(default_locale.clone()))?;
     let default_catalog_keys = default_catalog.keys().cloned().collect::<Vec<_>>();
+    let default_message_metadata =
+        collect_message_metadata(&default_locale, default_catalog, None)?;
 
     let id_map = build_id_map(default_catalog_keys.iter().cloned(), &id_salt)?;
     let id_map_hash = id_map.hash()?;
@@ -445,6 +465,7 @@ pub fn build_project_runtime_artifacts(
         default_locale,
         supported_locales,
         default_catalog_keys,
+        default_message_metadata,
     })
 }
 
@@ -492,9 +513,10 @@ pub fn build_native_module(
             runtime_output.default_locale(),
             runtime_output.supported_locales(),
             &generated_message_keys,
+            runtime_output.default_message_metadata(),
             options.artifact_dir_name(),
             options.module_macro_path(),
-        ),
+        )?,
     )?;
 
     let generated_catalog_path = runtime_output.artifact_dir().join(GENERATED_CATALOG_FILE);
@@ -602,9 +624,10 @@ fn render_generated_module(
     default_locale: &str,
     supported_locales: &[String],
     generated_message_keys: &[GeneratedMessageKey],
+    message_metadata: &[MessageMetadata],
     artifact_dir_name: &str,
     module_macro_path: &str,
-) -> String {
+) -> Result<String, NativeModuleBuildError> {
     let packs_source = supported_locales
         .iter()
         .map(|locale| {
@@ -634,10 +657,198 @@ fn render_generated_module(
         .map(|key| format!("            Self::{} => {:?},", key.variant, key.id))
         .collect::<Vec<_>>()
         .join("\n");
+    let metadata_by_id = message_metadata
+        .iter()
+        .map(|metadata| (metadata.id.as_str(), metadata))
+        .collect::<BTreeMap<_, _>>();
+    let mut typed_args_source = String::new();
+    let mut typed_helpers_source = String::new();
+    for key in generated_message_keys {
+        let metadata = metadata_by_id.get(key.id.as_str()).copied();
+        let args = metadata
+            .map(|value| value.args.as_slice())
+            .unwrap_or_default();
+        if !args.is_empty() {
+            typed_args_source.push_str(&render_generated_args_struct(key, args)?);
+        }
+        typed_helpers_source.push_str(&render_generated_typed_helpers(key, args)?);
+    }
 
-    format!(
+    Ok(format!(
         "mod generated {{\n    {module_macro_path} {{\n        init_policy: strict,\n        default_locale: {default_locale:?},\n        id_map_json: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{ID_MAP_JSON_FILE}\")),\n        id_map_hash: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{artifact_dir_name}/{ID_MAP_HASH_FILE}\")),\n        packs: [\n{packs_source}\n        ],\n    }}\n}}\n\n#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]\npub enum MessageKey {{\n{key_variants}\n}}\n\nimpl MessageKey {{\n    pub const ALL: &'static [Self] = &[\n{all_key_values}\n    ];\n\n    pub const fn id(self) -> &'static str {{\n        match self {{\n{key_id_matches}\n        }}\n    }}\n}}\n\nimpl ::core::fmt::Display for MessageKey {{\n    fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {{\n        formatter.write_str(self.id())\n    }}\n}}\n\npub const DEFAULT_LOCALE: &str = {default_locale:?};\npub const SUPPORTED_LOCALES: &[&str] = &[{supported_locale_values}];\npub const DEFAULT_CATALOG_KEYS: &[MessageKey] = MessageKey::ALL;\n\npub fn localizer() -> &'static mf2_i18n::NativeLocalizer {{\n    generated::localizer()\n}}\n\npub fn set_preferred_locales(preferred_locales: &[&str]) -> mf2_i18n::NativeResult<String> {{\n    generated::set_preferred_locales(preferred_locales)\n}}\n\npub fn set_locale(locale: &str) -> mf2_i18n::NativeResult<String> {{\n    generated::set_locale(locale)\n}}\n\npub fn negotiate_locale(preferred_locales: &[&str]) -> mf2_i18n::NativeResult<String> {{\n    generated::negotiate_locale(preferred_locales)\n}}\n\npub fn locale() -> String {{\n    generated::locale()\n}}\n\npub fn try_t(key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    generated::tr(key.id())\n}}\n\npub fn t(key: MessageKey) -> String {{\n    try_t(key).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_or_key(key: MessageKey) -> String {{\n    generated::tr_or_key(key.id())\n}}\n\npub fn try_t_locale(locale: &str, key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_locale(locale, key.id())\n}}\n\npub fn t_locale(locale: &str, key: MessageKey) -> String {{\n    try_t_locale(locale, key).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_locale_or_key(locale: &str, key: MessageKey) -> String {{\n    generated::tr_locale_or_key(locale, key.id())\n}}\n\npub fn try_t_with_args(key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_with_args(key.id(), args)\n}}\n\npub fn t_with_args(key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    try_t_with_args(key, args).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_with_args_or_key(key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    generated::tr_with_args_or_key(key.id(), args)\n}}\n\npub fn try_t_with_args_locale(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    generated::tr_with_args_locale(locale, key.id(), args)\n}}\n\npub fn t_with_args_locale(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    try_t_with_args_locale(locale, key, args).expect(\"mf2_i18n generated message formatting failed\")\n}}\n\npub fn t_with_args_locale_or_key(locale: &str, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    generated::tr_with_args_locale_or_key(locale, key.id(), args)\n}}\n"
-    )
+    ) + &typed_args_source
+        + &typed_helpers_source)
+}
+
+struct GeneratedArgParam {
+    name: String,
+    ty: String,
+}
+
+fn render_generated_args_struct(
+    key: &GeneratedMessageKey,
+    args: &[MessageArg],
+) -> Result<String, NativeModuleBuildError> {
+    let struct_name = generated_args_struct_name(key);
+    let params = generated_arg_params(args)?;
+    let param_values = params
+        .iter()
+        .map(|param| format!("{}: {}", param.name, param.ty))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let insertions = args
+        .iter()
+        .map(render_arg_insertion)
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n");
+
+    Ok(format!(
+        "\npub struct {struct_name} {{\n    args: mf2_i18n::Args,\n}}\n\nimpl {struct_name} {{\n    pub fn new({param_values}) -> Self {{\n        let mut args = mf2_i18n::Args::new();\n{insertions}\n        Self {{ args }}\n    }}\n\n    pub fn as_args(&self) -> &mf2_i18n::Args {{\n        &self.args\n    }}\n\n    pub fn into_args(self) -> mf2_i18n::Args {{\n        self.args\n    }}\n}}\n\nimpl ::core::convert::AsRef<mf2_i18n::Args> for {struct_name} {{\n    fn as_ref(&self) -> &mf2_i18n::Args {{\n        self.as_args()\n    }}\n}}\n"
+    ))
+}
+
+fn render_generated_typed_helpers(
+    key: &GeneratedMessageKey,
+    args: &[MessageArg],
+) -> Result<String, NativeModuleBuildError> {
+    let suffix = variant_function_suffix(&key.variant);
+    let variant = &key.variant;
+    if args.is_empty() {
+        return Ok(format!(
+            "\npub fn try_t_{suffix}() -> mf2_i18n::NativeResult<String> {{\n    try_t(MessageKey::{variant})\n}}\n\npub fn t_{suffix}() -> String {{\n    t(MessageKey::{variant})\n}}\n\npub fn t_{suffix}_or_key() -> String {{\n    t_or_key(MessageKey::{variant})\n}}\n"
+        ));
+    }
+
+    let struct_name = generated_args_struct_name(key);
+    Ok(format!(
+        "\npub fn try_t_{suffix}(args: &{struct_name}) -> mf2_i18n::NativeResult<String> {{\n    try_t_with_args(MessageKey::{variant}, args.as_args())\n}}\n\npub fn t_{suffix}(args: &{struct_name}) -> String {{\n    t_with_args(MessageKey::{variant}, args.as_args())\n}}\n\npub fn t_{suffix}_or_key(args: &{struct_name}) -> String {{\n    t_with_args_or_key(MessageKey::{variant}, args.as_args())\n}}\n"
+    ))
+}
+
+fn generated_args_struct_name(key: &GeneratedMessageKey) -> String {
+    format!("{}Args", key.variant)
+}
+
+fn generated_arg_params(
+    args: &[MessageArg],
+) -> Result<Vec<GeneratedArgParam>, NativeModuleBuildError> {
+    let mut used = BTreeMap::<String, String>::new();
+    let mut params = Vec::new();
+    for arg in args {
+        match arg.arg_type {
+            ArgType::String => push_arg_param(
+                &mut params,
+                &mut used,
+                rust_value_identifier(&arg.name)?,
+                "impl Into<String>".to_string(),
+                arg.name.clone(),
+            )?,
+            ArgType::Number => push_arg_param(
+                &mut params,
+                &mut used,
+                rust_value_identifier(&arg.name)?,
+                "f64".to_string(),
+                arg.name.clone(),
+            )?,
+            ArgType::Bool => push_arg_param(
+                &mut params,
+                &mut used,
+                rust_value_identifier(&arg.name)?,
+                "bool".to_string(),
+                arg.name.clone(),
+            )?,
+            ArgType::DateTime => push_arg_param(
+                &mut params,
+                &mut used,
+                rust_value_identifier(&arg.name)?,
+                "mf2_i18n::DateTimeValue".to_string(),
+                arg.name.clone(),
+            )?,
+            ArgType::Unit => {
+                let base = rust_value_identifier(&arg.name)?;
+                push_arg_param(
+                    &mut params,
+                    &mut used,
+                    format!("{base}_value"),
+                    "f64".to_string(),
+                    format!("{}.value", arg.name),
+                )?;
+                push_arg_param(
+                    &mut params,
+                    &mut used,
+                    format!("{base}_unit_id"),
+                    "u32".to_string(),
+                    format!("{}.unit_id", arg.name),
+                )?;
+            }
+            ArgType::Currency => {
+                let base = rust_value_identifier(&arg.name)?;
+                push_arg_param(
+                    &mut params,
+                    &mut used,
+                    format!("{base}_value"),
+                    "f64".to_string(),
+                    format!("{}.value", arg.name),
+                )?;
+                push_arg_param(
+                    &mut params,
+                    &mut used,
+                    format!("{base}_code"),
+                    "[u8; 3]".to_string(),
+                    format!("{}.code", arg.name),
+                )?;
+            }
+            ArgType::Any => push_arg_param(
+                &mut params,
+                &mut used,
+                rust_value_identifier(&arg.name)?,
+                "mf2_i18n::Value".to_string(),
+                arg.name.clone(),
+            )?,
+        }
+    }
+    Ok(params)
+}
+
+fn push_arg_param(
+    params: &mut Vec<GeneratedArgParam>,
+    used: &mut BTreeMap<String, String>,
+    name: String,
+    ty: String,
+    source: String,
+) -> Result<(), NativeModuleBuildError> {
+    if let Some(first_value) = used.insert(name.clone(), source.clone()) {
+        return Err(GeneratedKeyError::IdentifierCollision {
+            identifier: name,
+            first_value,
+            duplicate_value: source,
+        }
+        .into());
+    }
+    params.push(GeneratedArgParam { name, ty });
+    Ok(())
+}
+
+fn render_arg_insertion(arg: &MessageArg) -> Result<String, NativeModuleBuildError> {
+    let name = rust_value_identifier(&arg.name)?;
+    let key = &arg.name;
+    Ok(match arg.arg_type {
+        ArgType::String => {
+            format!("        args.insert({key:?}, mf2_i18n::Value::Str({name}.into()));")
+        }
+        ArgType::Number => format!("        args.insert({key:?}, mf2_i18n::Value::Num({name}));"),
+        ArgType::Bool => format!("        args.insert({key:?}, mf2_i18n::Value::Bool({name}));"),
+        ArgType::DateTime => {
+            format!("        args.insert({key:?}, mf2_i18n::Value::DateTime({name}));")
+        }
+        ArgType::Unit => format!(
+            "        args.insert({key:?}, mf2_i18n::Value::Unit {{ value: {name}_value, unit_id: {name}_unit_id }});"
+        ),
+        ArgType::Currency => format!(
+            "        args.insert({key:?}, mf2_i18n::Value::Currency {{ value: {name}_value, code: {name}_code }});"
+        ),
+        ArgType::Any => format!("        args.insert({key:?}, {name});"),
+    })
 }
 
 fn render_generated_catalog(
@@ -672,8 +883,11 @@ mod tests {
     use super::{
         GENERATED_CATALOG_FILE, NativeModuleBuildError, NativeModuleBuildOptions,
         ProjectRuntimeBuildOptions, build_native_module, build_project_runtime_artifacts,
+        render_generated_args_struct,
     };
-    use crate::generated_keys::GeneratedKeyError;
+    use crate::generated_keys::{GeneratedKeyError, GeneratedMessageKey};
+    use crate::message_metadata::MessageArg;
+    use crate::model::ArgType;
     use crate::platform::PlatformBundle;
     use crate::project_catalogs::ProjectCatalogError;
     use std::fs;
@@ -710,14 +924,14 @@ mod tests {
         write_catalog(
             &english_dir.join("common.json"),
             &[
-                ("home.title", "Hi"),
+                ("home.title", "Hi { $name }"),
                 ("home.subtitle", "Grow from the root"),
             ],
         );
         write_catalog(
             &french_dir.join("common.json"),
             &[
-                ("home.title", "Salut"),
+                ("home.title", "Salut { $name }"),
                 ("home.subtitle", "Cultiver depuis la racine"),
             ],
         );
@@ -852,6 +1066,10 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         assert!(generated_module.contains("pub fn try_t(key: MessageKey)"));
         assert!(generated_module.contains("pub fn t_or_key(key: MessageKey)"));
         assert!(generated_module.contains("pub fn try_t_with_args("));
+        assert!(generated_module.contains("pub struct CommonHomeTitleArgs"));
+        assert!(generated_module.contains("pub fn new(name: impl Into<String>)"));
+        assert!(generated_module.contains("pub fn t_common_home_title_or_key("));
+        assert!(generated_module.contains("pub fn t_common_home_subtitle()"));
 
         let generated_catalog =
             fs::read_to_string(output.generated_catalog_path()).expect("generated catalog");
@@ -951,6 +1169,77 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         );
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn generates_typed_args_for_formatter_types() {
+        let root = temp_dir("typed_args");
+        let locales_root = root.join("locales");
+        let english_dir = locales_root.join("en");
+        fs::create_dir_all(&english_dir).expect("english locale dir");
+
+        write_catalog(
+            &english_dir.join("common.json"),
+            &[
+                ("name", "Hi { $name }"),
+                ("count", "{ $count :number }"),
+                ("when", "{ $when :datetime }"),
+                ("distance", "{ $distance :unit }"),
+                ("total", "{ $total :currency }"),
+                ("mixed", "{ $value } { $value :number }"),
+            ],
+        );
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n",
+        )
+        .expect("config");
+
+        let output = build_native_module(&NativeModuleBuildOptions::new(
+            &config_path,
+            root.join("out"),
+            "app_i18n",
+        ))
+        .expect("build");
+        let generated_module =
+            fs::read_to_string(output.generated_module_path()).expect("generated module");
+
+        assert!(generated_module.contains("pub struct CommonNameArgs"));
+        assert!(generated_module.contains("name: impl Into<String>"));
+        assert!(generated_module.contains("count: f64"));
+        assert!(generated_module.contains("when: mf2_i18n::DateTimeValue"));
+        assert!(generated_module.contains("distance_value: f64"));
+        assert!(generated_module.contains("distance_unit_id: u32"));
+        assert!(generated_module.contains("total_value: f64"));
+        assert!(generated_module.contains("total_code: [u8; 3]"));
+        assert!(generated_module.contains("value: mf2_i18n::Value"));
+        assert!(generated_module.contains("pub fn t_common_total("));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn renders_typed_bool_args_from_metadata() {
+        let key = GeneratedMessageKey {
+            id: "common.enabled".to_string(),
+            variant: "CommonEnabled".to_string(),
+        };
+        let source = render_generated_args_struct(
+            &key,
+            &[MessageArg {
+                name: "enabled".to_string(),
+                arg_type: ArgType::Bool,
+                required: true,
+            }],
+        )
+        .expect("render");
+
+        assert!(source.contains("enabled: bool"));
+        assert!(source.contains("mf2_i18n::Value::Bool(enabled)"));
     }
 
     #[test]
