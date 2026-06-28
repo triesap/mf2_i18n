@@ -960,7 +960,8 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
             err,
             NativeModuleBuildError::Catalogs(ProjectCatalogError::CatalogKeyMismatch {
                 locale,
-                reference_locale
+                reference_locale,
+                ..
             }) if locale == "fr" && reference_locale == "en"
         ));
 

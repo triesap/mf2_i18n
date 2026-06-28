@@ -16,6 +16,7 @@ pub mod id_map;
 pub mod lexer;
 pub mod locale_sources;
 pub mod manifest;
+pub mod message_metadata;
 pub mod mf2_source;
 pub mod micro_locales;
 pub mod model;
@@ -41,6 +42,9 @@ pub use crate::config::{
 };
 pub use crate::diagnostic::{Diagnostic, DiagnosticReport, DiagnosticSeverity};
 pub use crate::error::BuildIoError;
+pub use crate::message_metadata::{
+    MessageArg, MessageMetadata, MessageMetadataError, collect_message_metadata, infer_message_args,
+};
 pub use crate::platform::{
     PlatformBundle, PlatformBundleError, PlatformBundleManifest, PlatformPack,
     load_platform_bundle_manifest, write_platform_bundle_manifest,

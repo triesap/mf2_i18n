@@ -104,11 +104,13 @@ pub enum ProjectCatalogError {
         duplicate_path: PathBuf,
     },
     #[error(
-        "i18n catalog keys for locale {locale} do not match reference locale {reference_locale}"
+        "i18n catalog keys for locale {locale} do not match reference locale {reference_locale}; missing {missing:?}; extra {extra:?}"
     )]
     CatalogKeyMismatch {
         locale: String,
         reference_locale: String,
+        missing: Vec<String>,
+        extra: Vec<String>,
     },
 }
 
@@ -149,7 +151,11 @@ pub fn load_project_catalogs_with_options(
         return Err(ProjectCatalogError::MissingDefaultLocale(default_locale));
     }
 
-    ensure_catalog_keys_match(&catalogs, &options.ignored_key_match_namespaces)?;
+    ensure_catalog_keys_match(
+        &default_locale,
+        &catalogs,
+        &options.ignored_key_match_namespaces,
+    )?;
 
     Ok(ProjectCatalogLoad {
         catalogs,
@@ -552,20 +558,34 @@ fn insert_message(
 }
 
 fn ensure_catalog_keys_match(
+    default_locale: &str,
     catalogs: &BTreeMap<String, ProjectCatalog>,
     ignored_namespaces: &BTreeSet<String>,
 ) -> Result<(), ProjectCatalogError> {
-    let Some((reference_locale, reference_catalog)) = catalogs.iter().next() else {
-        return Err(ProjectCatalogError::NoLocaleCatalogs);
-    };
+    let reference_catalog = catalogs
+        .get(default_locale)
+        .ok_or_else(|| ProjectCatalogError::MissingDefaultLocale(default_locale.to_owned()))?;
 
     let reference_keys = comparable_keys(reference_catalog, ignored_namespaces);
-    for (locale, catalog) in catalogs.iter().skip(1) {
+    for (locale, catalog) in catalogs {
+        if locale == default_locale {
+            continue;
+        }
         let keys = comparable_keys(catalog, ignored_namespaces);
-        if keys != reference_keys {
+        let missing = reference_keys
+            .difference(&keys)
+            .cloned()
+            .collect::<Vec<_>>();
+        let extra = keys
+            .difference(&reference_keys)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() || !extra.is_empty() {
             return Err(ProjectCatalogError::CatalogKeyMismatch {
                 locale: locale.clone(),
-                reference_locale: reference_locale.clone(),
+                reference_locale: default_locale.to_owned(),
+                missing,
+                extra,
             });
         }
     }
@@ -573,7 +593,10 @@ fn ensure_catalog_keys_match(
     Ok(())
 }
 
-fn comparable_keys(catalog: &ProjectCatalog, ignored_namespaces: &BTreeSet<String>) -> Vec<String> {
+fn comparable_keys(
+    catalog: &ProjectCatalog,
+    ignored_namespaces: &BTreeSet<String>,
+) -> BTreeSet<String> {
     catalog
         .values()
         .filter(|message| !ignored_namespaces.contains(&message.namespace))
@@ -831,8 +854,34 @@ root = "locales"
         let err = load(&root, "en").expect_err("mismatch");
         assert!(matches!(
             err,
-            ProjectCatalogError::CatalogKeyMismatch { locale, reference_locale }
-                if locale == "es" && reference_locale == "en"
+            ProjectCatalogError::CatalogKeyMismatch { locale, reference_locale, missing, extra }
+                if locale == "es"
+                    && reference_locale == "en"
+                    && missing == vec!["common.title".to_string()]
+                    && extra == vec!["common.subtitle".to_string()]
+        ));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn uses_default_locale_as_key_match_reference() {
+        let root = temp_dir("default_reference");
+        let en_dir = root.join("locales").join("en");
+        let fr_dir = root.join("locales").join("fr");
+        fs::create_dir_all(&en_dir).expect("en");
+        fs::create_dir_all(&fr_dir).expect("fr");
+        fs::write(en_dir.join("common.json"), r#"{"subtitle":"Hi"}"#).expect("en json");
+        fs::write(fr_dir.join("common.json"), r#"{"title":"Bonjour"}"#).expect("fr json");
+
+        let err = load(&root, "fr").expect_err("mismatch");
+        assert!(matches!(
+            err,
+            ProjectCatalogError::CatalogKeyMismatch { locale, reference_locale, missing, extra }
+                if locale == "en"
+                    && reference_locale == "fr"
+                    && missing == vec!["common.title".to_string()]
+                    && extra == vec!["common.subtitle".to_string()]
         ));
 
         fs::remove_dir_all(&root).ok();
