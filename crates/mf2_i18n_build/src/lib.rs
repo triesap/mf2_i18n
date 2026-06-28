@@ -12,6 +12,7 @@ pub mod dto_export;
 pub mod error;
 pub mod extract;
 pub mod extract_pipeline;
+pub mod generated_keys;
 pub mod id_map;
 pub mod lexer;
 pub mod locale_sources;
@@ -42,6 +43,9 @@ pub use crate::config::{
 };
 pub use crate::diagnostic::{Diagnostic, DiagnosticReport, DiagnosticSeverity};
 pub use crate::error::BuildIoError;
+pub use crate::generated_keys::{
+    GeneratedKeyError, GeneratedMessageKey, build_generated_message_keys, message_key_variant,
+};
 pub use crate::message_metadata::{
     MessageArg, MessageMetadata, MessageMetadataError, collect_message_metadata, infer_message_args,
 };

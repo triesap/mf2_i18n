@@ -10,8 +10,9 @@ mod tests {
         build_native_module, export_web_json,
     };
     use mf2_i18n::{
-        BuildIoError, CompileError, PlatformBundleManifest, ProjectConfig, ProjectLayout,
-        WebJsonMode, load_project_config_or_default, resolve_config_relative_path,
+        BuildIoError, CompileError, GeneratedKeyError, PlatformBundleManifest, ProjectConfig,
+        ProjectLayout, WebJsonMode, load_project_config_or_default, message_key_variant,
+        resolve_config_relative_path,
     };
 
     fn temp_path(name: &str) -> PathBuf {
@@ -51,6 +52,7 @@ mod tests {
         assert_eq!(config.default_locale, "en");
 
         let _compile_error: Option<CompileError> = None;
+        let _generated_key_error: Option<GeneratedKeyError> = None;
         let _io_error: Option<BuildIoError> = None;
         let _layout: Option<ProjectLayout> = None;
         let _manifest: Option<PlatformBundleManifest> = None;
@@ -64,6 +66,10 @@ mod tests {
             WebJsonExportOptions::new(&path, std::env::temp_dir()).with_mode(WebJsonMode::Plain);
         let project_root = resolve_config_relative_path(&path, "locales");
         assert!(project_root.ends_with("locales"));
+        assert_eq!(
+            message_key_variant("common.home.title").unwrap(),
+            "CommonHomeTitle"
+        );
 
         let default_config = ProjectConfig::default();
         assert_eq!(default_config.project_salt_path, "id_salt.txt");

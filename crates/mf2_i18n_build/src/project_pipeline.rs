@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::artifacts::{write_id_map, write_id_map_hash};
 use crate::compiler::{CompileError, compile_message};
+use crate::generated_keys::{GeneratedKeyError, GeneratedMessageKey, build_generated_message_keys};
 use crate::id_map::{IdMap, IdMapError, build_id_map};
 use crate::manifest::{Manifest, PackEntry, sha256_hex};
 use crate::micro_locales::{MicroLocaleError, load_micro_locales};
@@ -286,6 +287,8 @@ pub enum NativeModuleBuildError {
     #[error(transparent)]
     IdMap(#[from] IdMapError),
     #[error(transparent)]
+    GeneratedKeys(#[from] GeneratedKeyError),
+    #[error(transparent)]
     MicroLocales(#[from] MicroLocaleError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -479,6 +482,9 @@ pub fn build_native_module(
         options.generated_at(),
     ))?;
 
+    let generated_message_keys =
+        build_generated_message_keys(runtime_output.default_catalog_keys())?;
+
     let generated_module_path = runtime_output.artifact_dir().join(GENERATED_MODULE_FILE);
     fs::write(
         &generated_module_path,
@@ -497,6 +503,7 @@ pub fn build_native_module(
             runtime_output.default_locale(),
             runtime_output.supported_locales(),
             runtime_output.default_catalog_keys(),
+            &generated_message_keys,
         ),
     )?;
 
@@ -615,6 +622,7 @@ fn render_generated_catalog(
     default_locale: &str,
     supported_locales: &[String],
     default_catalog_keys: &[String],
+    generated_message_keys: &[GeneratedMessageKey],
 ) -> String {
     let supported_locale_values = supported_locales
         .iter()
@@ -626,18 +634,24 @@ fn render_generated_catalog(
         .map(|key| format!("{key:?}"))
         .collect::<Vec<_>>()
         .join(", ");
+    let key_variant_values = generated_message_keys
+        .iter()
+        .map(|key| format!("({:?}, {:?})", key.id, key.variant))
+        .collect::<Vec<_>>()
+        .join(", ");
 
     format!(
-        "const DEFAULT_LOCALE_ID: &str = {default_locale:?};\nconst SUPPORTED_LOCALE_IDS: &[&str] = &[{supported_locale_values}];\n#[cfg(test)] const DEFAULT_CATALOG_KEY_IDS: &[&str] = &[{key_values}];\n"
+        "const DEFAULT_LOCALE_ID: &str = {default_locale:?};\nconst SUPPORTED_LOCALE_IDS: &[&str] = &[{supported_locale_values}];\n#[cfg(test)] const DEFAULT_CATALOG_KEY_IDS: &[&str] = &[{key_values}];\n#[cfg(test)] const DEFAULT_CATALOG_KEY_VARIANTS: &[(&str, &str)] = &[{key_variant_values}];\n"
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        NativeModuleBuildError, NativeModuleBuildOptions, ProjectRuntimeBuildOptions,
-        build_native_module, build_project_runtime_artifacts,
+        GENERATED_CATALOG_FILE, NativeModuleBuildError, NativeModuleBuildOptions,
+        ProjectRuntimeBuildOptions, build_native_module, build_project_runtime_artifacts,
     };
+    use crate::generated_keys::GeneratedKeyError;
     use crate::platform::PlatformBundle;
     use crate::project_catalogs::ProjectCatalogError;
     use std::fs;
@@ -815,6 +829,97 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         assert!(generated_catalog.contains("DEFAULT_LOCALE_ID"));
         assert!(generated_catalog.contains("\"fr\""));
         assert!(generated_catalog.contains("\"common.home.title\""));
+        assert!(generated_catalog.contains("(\"common.home.title\", \"CommonHomeTitle\")"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn generated_key_collisions_fail_native_module_build() {
+        let root = temp_dir("generated_key_collision");
+        let locales_root = root.join("locales");
+        let english_dir = locales_root.join("en");
+        fs::create_dir_all(&english_dir).expect("english locale dir");
+
+        write_catalog(
+            &english_dir.join("common.json"),
+            &[("home-title", "Hi"), ("home_title", "Hello")],
+        );
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n",
+        )
+        .expect("config");
+
+        let err = build_native_module(&NativeModuleBuildOptions::new(
+            &config_path,
+            root.join("out"),
+            "app_i18n",
+        ))
+        .expect_err("collision should fail");
+        assert!(matches!(
+            err,
+            NativeModuleBuildError::GeneratedKeys(GeneratedKeyError::VariantCollision {
+                variant,
+                first_key,
+                duplicate_key,
+            }) if variant == "CommonHomeTitle"
+                && first_key == "common.home-title"
+                && duplicate_key == "common.home_title"
+        ));
+        assert!(
+            !root
+                .join("out")
+                .join("app_i18n")
+                .join(GENERATED_CATALOG_FILE)
+                .exists()
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn generated_key_invalid_ids_fail_native_module_build() {
+        let root = temp_dir("generated_key_invalid");
+        let locales_root = root.join("locales");
+        let english_dir = locales_root.join("en");
+        fs::create_dir_all(&english_dir).expect("english locale dir");
+
+        write_catalog(&english_dir.join("common.json"), &[("home/title", "Hi")]);
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n",
+        )
+        .expect("config");
+
+        let err = build_native_module(&NativeModuleBuildOptions::new(
+            &config_path,
+            root.join("out"),
+            "app_i18n",
+        ))
+        .expect_err("invalid key should fail");
+        assert!(matches!(
+            err,
+            NativeModuleBuildError::GeneratedKeys(GeneratedKeyError::InvalidMessageKey {
+                key,
+                ..
+            }) if key == "common.home/title"
+        ));
+        assert!(
+            !root
+                .join("out")
+                .join("app_i18n")
+                .join(GENERATED_CATALOG_FILE)
+                .exists()
+        );
 
         fs::remove_dir_all(&root).ok();
     }
