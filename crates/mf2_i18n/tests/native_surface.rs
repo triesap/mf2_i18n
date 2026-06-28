@@ -25,8 +25,13 @@ mod tests {
         args.insert("count", Value::Num(2.0));
 
         assert_eq!(generated::default_locale(), "en");
+        assert_eq!(generated::negotiate_locale(&["en-US"]).unwrap(), "en-US");
         assert_eq!(
             generated::tr_with_args_or_key("home.title", &args),
+            "home.title"
+        );
+        assert_eq!(
+            generated::tr_with_args_locale_or_key("en-US", "home.title", &args),
             "home.title"
         );
     }

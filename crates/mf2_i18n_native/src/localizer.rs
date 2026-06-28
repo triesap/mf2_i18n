@@ -118,6 +118,16 @@ impl NativeLocalizer {
         self.set_preferred_locales([locale])
     }
 
+    pub fn negotiate_locale<I, S>(&self, preferred_locales: I) -> NativeResult<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let requested = normalize_requested_locales(preferred_locales, &self.default_locale);
+        let parsed = parse_requested_locales(&requested)?;
+        Ok(self.select_locale(&parsed))
+    }
+
     pub fn locale(&self) -> String {
         match self.active_locale.read() {
             Ok(guard) => guard.clone(),
@@ -147,29 +157,58 @@ impl NativeLocalizer {
     }
 
     pub fn tr(&self, key: &str) -> NativeResult<String> {
-        let args = Args::new();
-        self.tr_with_args(key, &args)
+        let locale = self.locale();
+        self.tr_locale(&locale, key)
     }
 
     pub fn tr_with_args(&self, key: &str, args: &Args) -> NativeResult<String> {
-        self.format(key, args)
+        let locale = self.locale();
+        self.tr_with_args_locale(&locale, key, args)
+    }
+
+    pub fn tr_locale(&self, locale: &str, key: &str) -> NativeResult<String> {
+        let args = Args::new();
+        self.tr_with_args_locale(locale, key, &args)
+    }
+
+    pub fn tr_with_args_locale(
+        &self,
+        locale: &str,
+        key: &str,
+        args: &Args,
+    ) -> NativeResult<String> {
+        self.format_locale(locale, key, args)
     }
 
     pub fn tr_or_key(&self, key: &str) -> String {
-        let args = Args::new();
-        self.tr_with_args_or_key(key, &args)
+        let locale = self.locale();
+        self.tr_locale_or_key(&locale, key)
     }
 
     pub fn tr_with_args_or_key(&self, key: &str, args: &Args) -> String {
-        self.tr_with_args(key, args)
+        let locale = self.locale();
+        self.tr_with_args_locale_or_key(&locale, key, args)
+    }
+
+    pub fn tr_locale_or_key(&self, locale: &str, key: &str) -> String {
+        let args = Args::new();
+        self.tr_with_args_locale_or_key(locale, key, &args)
+    }
+
+    pub fn tr_with_args_locale_or_key(&self, locale: &str, key: &str, args: &Args) -> String {
+        self.tr_with_args_locale(locale, key, args)
             .unwrap_or_else(|_| key.to_owned())
     }
 
     pub fn format(&self, key: &str, args: &Args) -> NativeResult<String> {
         let locale = self.locale();
+        self.format_locale(&locale, key, args)
+    }
+
+    pub fn format_locale(&self, locale: &str, key: &str, args: &Args) -> NativeResult<String> {
         let backend =
-            StdFormatBackend::new(&locale).map_err(|err| NativeError::Core(err.to_string()))?;
-        self.format_with_backend(key, args, &backend)
+            StdFormatBackend::new(locale).map_err(|err| NativeError::Core(err.to_string()))?;
+        self.format_locale_with_backend(locale, key, args, &backend)
     }
 
     pub fn format_with_backend(
@@ -179,12 +218,22 @@ impl NativeLocalizer {
         backend: &dyn FormatBackend,
     ) -> NativeResult<String> {
         let locale = self.locale();
+        self.format_locale_with_backend(&locale, key, args, backend)
+    }
+
+    pub fn format_locale_with_backend(
+        &self,
+        locale: &str,
+        key: &str,
+        args: &Args,
+        backend: &dyn FormatBackend,
+    ) -> NativeResult<String> {
         match self.runtime.as_ref() {
             Some(NativeRuntime::Embedded(runtime)) => {
-                Ok(runtime.format_with_backend(&locale, key, args, backend)?)
+                Ok(runtime.format_with_backend(locale, key, args, backend)?)
             }
             Some(NativeRuntime::Filesystem(runtime)) => {
-                Ok(runtime.format_with_backend(&locale, key, args, backend)?)
+                Ok(runtime.format_with_backend(locale, key, args, backend)?)
             }
             None => Err(NativeError::NotInitialized),
         }
@@ -424,6 +473,46 @@ mod tests {
             vec!["en".to_string(), "fr".to_string()]
         );
         assert_eq!(localizer.tr("home.title").expect("translation"), "salut");
+    }
+
+    #[test]
+    fn explicit_locale_methods_do_not_mutate_active_locale() {
+        let id_map_json = br#"{"home.title": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let en_pack = build_pack_bytes(id_map_hash, "en", "hi");
+        let fr_pack = build_pack_bytes(id_map_hash, "fr", "salut");
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [
+            EmbeddedPack {
+                locale: "en",
+                bytes: &en_pack,
+            },
+            EmbeddedPack {
+                locale: "fr",
+                bytes: &fr_pack,
+            },
+        ];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+
+        localizer.set_locale("fr").expect("locale");
+        assert_eq!(localizer.locale(), "fr");
+        assert_eq!(localizer.negotiate_locale(["en-GB"]).expect("locale"), "en");
+        assert_eq!(localizer.tr_locale("en", "home.title").expect("en"), "hi");
+        assert_eq!(
+            localizer
+                .tr_with_args_locale("en-US", "home.title", &Args::new())
+                .expect("en-us"),
+            "hi"
+        );
+        assert_eq!(localizer.tr("home.title").expect("active"), "salut");
+        assert_eq!(localizer.locale(), "fr");
     }
 
     #[test]

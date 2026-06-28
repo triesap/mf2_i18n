@@ -38,6 +38,10 @@ macro_rules! define_i18n_module {
             LOCALIZER.set_locale(locale)
         }
 
+        pub fn negotiate_locale(preferred_locales: &[&str]) -> $crate::NativeResult<String> {
+            LOCALIZER.negotiate_locale(preferred_locales.iter().copied())
+        }
+
         pub fn locale() -> String {
             LOCALIZER.locale()
         }
@@ -62,6 +66,18 @@ macro_rules! define_i18n_module {
             LOCALIZER.tr_with_args(key, args)
         }
 
+        pub fn tr_locale(locale: &str, key: &str) -> $crate::NativeResult<String> {
+            LOCALIZER.tr_locale(locale, key)
+        }
+
+        pub fn tr_with_args_locale(
+            locale: &str,
+            key: &str,
+            args: &$crate::Args,
+        ) -> $crate::NativeResult<String> {
+            LOCALIZER.tr_with_args_locale(locale, key, args)
+        }
+
         pub fn tr_or_key(key: &str) -> String {
             LOCALIZER.tr_or_key(key)
         }
@@ -70,8 +86,24 @@ macro_rules! define_i18n_module {
             LOCALIZER.tr_with_args_or_key(key, args)
         }
 
+        pub fn tr_locale_or_key(locale: &str, key: &str) -> String {
+            LOCALIZER.tr_locale_or_key(locale, key)
+        }
+
+        pub fn tr_with_args_locale_or_key(locale: &str, key: &str, args: &$crate::Args) -> String {
+            LOCALIZER.tr_with_args_locale_or_key(locale, key, args)
+        }
+
         pub fn format(key: &str, args: &$crate::Args) -> $crate::NativeResult<String> {
             LOCALIZER.format(key, args)
+        }
+
+        pub fn format_locale(
+            locale: &str,
+            key: &str,
+            args: &$crate::Args,
+        ) -> $crate::NativeResult<String> {
+            LOCALIZER.format_locale(locale, key, args)
         }
     };
     (
@@ -111,6 +143,10 @@ macro_rules! define_i18n_module {
             LOCALIZER.set_locale(locale)
         }
 
+        pub fn negotiate_locale(preferred_locales: &[&str]) -> $crate::NativeResult<String> {
+            LOCALIZER.negotiate_locale(preferred_locales.iter().copied())
+        }
+
         pub fn locale() -> String {
             LOCALIZER.locale()
         }
@@ -135,6 +171,18 @@ macro_rules! define_i18n_module {
             LOCALIZER.tr_with_args(key, args)
         }
 
+        pub fn tr_locale(locale: &str, key: &str) -> $crate::NativeResult<String> {
+            LOCALIZER.tr_locale(locale, key)
+        }
+
+        pub fn tr_with_args_locale(
+            locale: &str,
+            key: &str,
+            args: &$crate::Args,
+        ) -> $crate::NativeResult<String> {
+            LOCALIZER.tr_with_args_locale(locale, key, args)
+        }
+
         pub fn tr_or_key(key: &str) -> String {
             LOCALIZER.tr_or_key(key)
         }
@@ -143,8 +191,24 @@ macro_rules! define_i18n_module {
             LOCALIZER.tr_with_args_or_key(key, args)
         }
 
+        pub fn tr_locale_or_key(locale: &str, key: &str) -> String {
+            LOCALIZER.tr_locale_or_key(locale, key)
+        }
+
+        pub fn tr_with_args_locale_or_key(locale: &str, key: &str, args: &$crate::Args) -> String {
+            LOCALIZER.tr_with_args_locale_or_key(locale, key, args)
+        }
+
         pub fn format(key: &str, args: &$crate::Args) -> $crate::NativeResult<String> {
             LOCALIZER.format(key, args)
+        }
+
+        pub fn format_locale(
+            locale: &str,
+            key: &str,
+            args: &$crate::Args,
+        ) -> $crate::NativeResult<String> {
+            LOCALIZER.format_locale(locale, key, args)
         }
     };
 }
@@ -183,7 +247,15 @@ mod tests {
             generated_fallback::tr("home.title"),
             Err(crate::NativeError::NotInitialized)
         ));
+        assert_eq!(
+            generated_fallback::negotiate_locale(&["en-US"]).expect("locale"),
+            "en-US"
+        );
         assert_eq!(generated_fallback::tr_or_key("home.title"), "home.title");
+        assert_eq!(
+            generated_fallback::tr_locale_or_key("en-US", "home.title"),
+            "home.title"
+        );
     }
 
     #[test]
