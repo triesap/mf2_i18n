@@ -6,8 +6,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use mf2_i18n::build::{
-        CargoNativeModuleBuildOptions, NativeModuleBuildOptions, ProjectRuntimeBuildOptions,
-        WebJsonExportOptions, build_native_module, build_native_module_for_cargo, export_web_json,
+        CargoNativeModuleBuildOptions, LeptosTargetBuildOptions, NativeModuleBuildOptions,
+        ProjectRuntimeBuildOptions, WebJsonExportOptions, build_leptos_target, build_native_module,
+        build_native_module_for_cargo, export_web_json,
     };
     use mf2_i18n::{
         BuildIoError, CompileError, GeneratedKeyError, PlatformBundleManifest, ProjectConfig,
@@ -64,6 +65,7 @@ mod tests {
         );
         let _cargo_native_options =
             CargoNativeModuleBuildOptions::new(&path, "app", std::env::temp_dir());
+        let _leptos_options = LeptosTargetBuildOptions::new(&path, "app");
         let _web_json_options =
             WebJsonExportOptions::new(&path, std::env::temp_dir()).with_mode(WebJsonMode::Plain);
         let project_root = resolve_config_relative_path(&path, "locales");
@@ -135,6 +137,33 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         assert_eq!(output.default_locale(), "en");
         assert!(output.generated_module_path().exists());
         assert!(output.artifact_dir().ends_with("app_i18n"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn facade_build_module_exports_leptos_target_pipeline() {
+        let root = temp_dir("leptos_pipeline");
+        let locales_root = root.join("locales");
+        let english_dir = locales_root.join("en");
+        fs::create_dir_all(&english_dir).expect("english locale dir");
+        write_catalog(&english_dir.join("homepage.json"), &[("title", "Radroots")]);
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[native.targets]]\nname = \"app-native\"\nout_dir = \"generated/native\"\nmodule_name = \"native_i18n\"\n\n[[leptos.targets]]\nname = \"app\"\nnative_target = \"app-native\"\nout_dir = \"generated/leptos\"\nmodule_name = \"app_i18n\"\ndocument_title_key = \"homepage.title\"\nsync_html_lang = true\n",
+        )
+        .expect("config");
+
+        let output = build_leptos_target(&LeptosTargetBuildOptions::new(&config_path, "app"))
+            .expect("build");
+
+        assert_eq!(output.module_name(), "app_i18n");
+        assert!(output.generated_module_path().exists());
+        assert!(output.native_output().generated_module_path().exists());
 
         fs::remove_dir_all(&root).ok();
     }

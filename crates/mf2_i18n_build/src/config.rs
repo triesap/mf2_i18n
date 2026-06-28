@@ -273,6 +273,8 @@ pub enum ProjectConfigError {
     EmptyLeptosTargetOutDir { target: String },
     #[error("leptos target {target} module_name must not be empty")]
     EmptyLeptosModuleName { target: String },
+    #[error("leptos target {target} module_name must be a Rust identifier: {module_name}")]
+    InvalidLeptosModuleName { target: String, module_name: String },
     #[error("leptos target {target} document_title_key must not be empty when provided")]
     EmptyLeptosDocumentTitleKey { target: String },
     #[error(transparent)]
@@ -526,6 +528,12 @@ impl LeptosTargetConfig {
                 target: self.name.clone(),
             });
         }
+        if !is_rust_identifier(&self.module_name) {
+            return Err(ProjectConfigError::InvalidLeptosModuleName {
+                target: self.name.clone(),
+                module_name: self.module_name.clone(),
+            });
+        }
         if self
             .document_title_key
             .as_deref()
@@ -537,6 +545,15 @@ impl LeptosTargetConfig {
         }
         Ok(())
     }
+}
+
+fn is_rust_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|value| value == '_' || value.is_ascii_alphanumeric())
 }
 
 impl WebTargetConfig {
@@ -1076,6 +1093,41 @@ document_title_key = ""
             err,
             BuildIoError::Config(message)
                 if message == "leptos target app document_title_key must not be empty when provided"
+        ));
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_invalid_leptos_module_name() {
+        let path = temp_path("invalid_leptos_module");
+        fs::write(
+            &path,
+            r#"
+version = 1
+default_locale = "en"
+source_dirs = ["locales"]
+project_salt_path = "id_salt.txt"
+
+[[native.targets]]
+name = "app-native"
+out_dir = "target/mf2/native"
+module_name = "app_i18n"
+
+[[leptos.targets]]
+name = "app"
+native_target = "app-native"
+out_dir = "src/generated/i18n"
+module_name = "app-i18n"
+"#,
+        )
+        .expect("write");
+
+        let err = load_project_config_or_default(&path).expect_err("invalid module name");
+        assert!(matches!(
+            err,
+            BuildIoError::Config(message)
+                if message == "leptos target app module_name must be a Rust identifier: app-i18n"
         ));
 
         fs::remove_file(&path).ok();

@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::artifacts::{write_id_map, write_id_map_hash};
 use crate::compiler::{CompileError, compile_message};
-use crate::config::NativeTargetConfig;
+use crate::config::{LeptosTargetConfig, NativeTargetConfig};
 use crate::generated_keys::{
     GeneratedKeyError, GeneratedMessageKey, build_generated_message_keys, rust_value_identifier,
     variant_function_suffix,
@@ -28,6 +28,7 @@ const DEFAULT_MODULE_MACRO_PATH: &str = "mf2_i18n::define_i18n_module!";
 const DEFAULT_GENERATED_AT: &str = "1970-01-01T00:00:00Z";
 const GENERATED_MODULE_FILE: &str = "generated_module.rs";
 const GENERATED_CATALOG_FILE: &str = "generated_catalog.rs";
+const GENERATED_LEPTOS_FILE_SUFFIX: &str = ".rs";
 const MANIFEST_FILE: &str = "manifest.json";
 const PACKS_DIR: &str = "packs";
 const PLATFORM_BUNDLE_FILE: &str = "platform-bundle.json";
@@ -265,6 +266,40 @@ impl CargoNativeModuleBuildOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct LeptosTargetBuildOptions {
+    config_path: PathBuf,
+    target_name: String,
+    out_dir: Option<PathBuf>,
+}
+
+impl LeptosTargetBuildOptions {
+    pub fn new(config_path: impl Into<PathBuf>, target_name: impl Into<String>) -> Self {
+        Self {
+            config_path: config_path.into(),
+            target_name: target_name.into(),
+            out_dir: None,
+        }
+    }
+
+    pub fn with_out_dir(mut self, out_dir: impl Into<PathBuf>) -> Self {
+        self.out_dir = Some(out_dir.into());
+        self
+    }
+
+    pub fn config_path(&self) -> &Path {
+        &self.config_path
+    }
+
+    pub fn target_name(&self) -> &str {
+        &self.target_name
+    }
+
+    pub fn out_dir(&self) -> Option<&Path> {
+        self.out_dir.as_deref()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ProjectRuntimeBuildOutput {
     artifact_dir: PathBuf,
     id_map_path: PathBuf,
@@ -386,6 +421,42 @@ impl NativeModuleBuildOutput {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct LeptosTargetBuildOutput {
+    out_dir: PathBuf,
+    generated_module_path: PathBuf,
+    native_output: NativeModuleBuildOutput,
+    module_name: String,
+    document_title_key: Option<String>,
+    sync_html_lang: bool,
+}
+
+impl LeptosTargetBuildOutput {
+    pub fn out_dir(&self) -> &Path {
+        &self.out_dir
+    }
+
+    pub fn generated_module_path(&self) -> &Path {
+        &self.generated_module_path
+    }
+
+    pub fn native_output(&self) -> &NativeModuleBuildOutput {
+        &self.native_output
+    }
+
+    pub fn module_name(&self) -> &str {
+        &self.module_name
+    }
+
+    pub fn document_title_key(&self) -> Option<&str> {
+        self.document_title_key.as_deref()
+    }
+
+    pub fn sync_html_lang(&self) -> bool {
+        self.sync_html_lang
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum NativeModuleBuildError {
     #[error(transparent)]
@@ -435,6 +506,27 @@ pub enum NativeModuleBuildError {
     },
     #[error("missing message id for locale {locale} key {key}")]
     MissingMessageId { locale: String, key: String },
+}
+
+#[derive(Debug, Error)]
+pub enum LeptosTargetBuildError {
+    #[error(transparent)]
+    Project(#[from] ProjectError),
+    #[error(transparent)]
+    Native(#[from] NativeModuleBuildError),
+    #[error(transparent)]
+    GeneratedKeys(#[from] GeneratedKeyError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("missing leptos target {0}")]
+    MissingLeptosTarget(String),
+    #[error("leptos target {target} references missing native target {native_target}")]
+    MissingNativeTarget {
+        target: String,
+        native_target: String,
+    },
+    #[error("leptos target {target} document_title_key {key} is not in the generated catalog")]
+    UnknownDocumentTitleKey { target: String, key: String },
 }
 
 pub fn build_project_runtime_artifacts(
@@ -651,6 +743,60 @@ pub fn build_native_module_for_cargo(
     ))
 }
 
+pub fn build_leptos_target(
+    options: &LeptosTargetBuildOptions,
+) -> Result<LeptosTargetBuildOutput, LeptosTargetBuildError> {
+    let project = ProjectLayout::load_or_default(options.config_path())?;
+    let leptos_target = project
+        .config()
+        .leptos
+        .target(options.target_name())
+        .ok_or_else(|| LeptosTargetBuildError::MissingLeptosTarget(options.target_name.clone()))?;
+    let native_target = project
+        .config()
+        .native
+        .target(&leptos_target.native_target)
+        .ok_or_else(|| LeptosTargetBuildError::MissingNativeTarget {
+            target: leptos_target.name.clone(),
+            native_target: leptos_target.native_target.clone(),
+        })?;
+    let out_dir = options
+        .out_dir()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| leptos_target.resolve_out_dir(project.config_path()));
+    fs::create_dir_all(&out_dir)?;
+
+    let native_output = build_native_module(&NativeModuleBuildOptions::from_target_config(
+        project.config_path(),
+        &out_dir,
+        native_target,
+    ))?;
+    let generated_keys = build_generated_message_keys(native_output.default_catalog_keys())?;
+    let document_title_variant =
+        resolve_leptos_document_title_variant(leptos_target, &generated_keys)?;
+    let generated_module_path = out_dir.join(format!(
+        "{}{GENERATED_LEPTOS_FILE_SUFFIX}",
+        leptos_target.module_name
+    ));
+    fs::write(
+        &generated_module_path,
+        render_generated_leptos_module(
+            leptos_target,
+            native_target,
+            document_title_variant.as_deref(),
+        ),
+    )?;
+
+    Ok(LeptosTargetBuildOutput {
+        out_dir,
+        generated_module_path,
+        native_output,
+        module_name: leptos_target.module_name.clone(),
+        document_title_key: leptos_target.document_title_key.clone(),
+        sync_html_lang: leptos_target.sync_html_lang,
+    })
+}
+
 fn validate_options(options: &NativeModuleBuildOptions) -> Result<(), NativeModuleBuildError> {
     if options.artifact_dir_name().trim().is_empty() {
         return Err(NativeModuleBuildError::EmptyArtifactDirName);
@@ -687,6 +833,38 @@ fn validate_runtime_options(
     }
 
     Ok(())
+}
+
+fn resolve_leptos_document_title_variant(
+    leptos_target: &LeptosTargetConfig,
+    generated_keys: &[GeneratedMessageKey],
+) -> Result<Option<String>, LeptosTargetBuildError> {
+    let Some(document_title_key) = leptos_target.document_title_key.as_deref() else {
+        return Ok(None);
+    };
+    generated_keys
+        .iter()
+        .find(|key| key.id == document_title_key)
+        .map(|key| Some(key.variant.clone()))
+        .ok_or_else(|| LeptosTargetBuildError::UnknownDocumentTitleKey {
+            target: leptos_target.name.clone(),
+            key: document_title_key.to_string(),
+        })
+}
+
+fn render_generated_leptos_module(
+    leptos_target: &LeptosTargetConfig,
+    native_target: &NativeTargetConfig,
+    document_title_variant: Option<&str>,
+) -> String {
+    let native_module_path = format!("{}/{}", native_target.module_name, GENERATED_MODULE_FILE);
+    let document_title_key = document_title_variant
+        .map(|variant| format!("Some(MessageKey::{variant})"))
+        .unwrap_or_else(|| "None".to_string());
+    format!(
+        "include!({native_module_path:?});\n\npub const LEPTOS_MODULE_NAME: &str = {:?};\npub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = {document_title_key};\npub const LEPTOS_SYNC_HTML_LANG: bool = {};\n\npub fn leptos_document_title_key() -> Option<MessageKey> {{\n    LEPTOS_DOCUMENT_TITLE_KEY\n}}\n\npub fn leptos_sync_html_lang() -> bool {{\n    LEPTOS_SYNC_HTML_LANG\n}}\n",
+        leptos_target.module_name, leptos_target.sync_html_lang
+    )
 }
 
 fn compile_catalog_pack(
@@ -992,8 +1170,9 @@ fn render_generated_catalog(
 #[cfg(test)]
 mod tests {
     use super::{
-        CargoNativeModuleBuildOptions, GENERATED_CATALOG_FILE, NativeModuleBuildError,
-        NativeModuleBuildOptions, ProjectRuntimeBuildOptions, build_native_module,
+        CargoNativeModuleBuildOptions, GENERATED_CATALOG_FILE, LeptosTargetBuildError,
+        LeptosTargetBuildOptions, NativeModuleBuildError, NativeModuleBuildOptions,
+        ProjectRuntimeBuildOptions, build_leptos_target, build_native_module,
         build_native_module_for_cargo, build_project_runtime_artifacts,
         render_generated_args_struct,
     };
@@ -1267,6 +1446,116 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         assert!(matches!(
             err,
             NativeModuleBuildError::MissingNativeTarget(target) if target == "missing"
+        ));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn builds_leptos_target() {
+        let root = temp_dir("leptos_target");
+        let locales_root = root.join("locales");
+        let english_dir = locales_root.join("en");
+        let spanish_dir = locales_root.join("es");
+        fs::create_dir_all(&english_dir).expect("english locale dir");
+        fs::create_dir_all(&spanish_dir).expect("spanish locale dir");
+        write_catalog(
+            &english_dir.join("homepage.json"),
+            &[("title", "Radroots"), ("welcome", "Welcome { $name }")],
+        );
+        write_catalog(
+            &spanish_dir.join("homepage.json"),
+            &[("title", "Raices"), ("welcome", "Hola { $name }")],
+        );
+        fs::write(root.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = root.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[native.targets]]\nname = \"app-native\"\nout_dir = \"target/mf2/native\"\nmodule_name = \"native_i18n\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"homepage\"]\n\n[[leptos.targets]]\nname = \"app\"\nnative_target = \"app-native\"\nout_dir = \"src/generated/i18n\"\nmodule_name = \"app_i18n\"\ndocument_title_key = \"homepage.title\"\nsync_html_lang = true\n",
+        )
+        .expect("config");
+
+        let output = build_leptos_target(&LeptosTargetBuildOptions::new(&config_path, "app"))
+            .expect("build");
+
+        assert_eq!(output.module_name(), "app_i18n");
+        assert_eq!(output.document_title_key(), Some("homepage.title"));
+        assert!(output.sync_html_lang());
+        assert_eq!(output.out_dir(), root.join("src/generated/i18n"));
+        assert_eq!(
+            output.generated_module_path(),
+            root.join("src/generated/i18n/app_i18n.rs")
+        );
+        assert_eq!(
+            output.native_output().artifact_dir(),
+            root.join("src/generated/i18n/native_i18n")
+        );
+
+        let generated_module =
+            fs::read_to_string(output.generated_module_path()).expect("generated module");
+        assert!(generated_module.contains("include!(\"native_i18n/generated_module.rs\")"));
+        assert!(generated_module.contains("pub const LEPTOS_MODULE_NAME: &str = \"app_i18n\""));
+        assert!(generated_module.contains(
+            "pub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = Some(MessageKey::HomepageTitle);"
+        ));
+        assert!(generated_module.contains("pub const LEPTOS_SYNC_HTML_LANG: bool = true;"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn leptos_target_out_dir_override_writes_to_requested_dir() {
+        let root = temp_dir("leptos_out_override");
+        let config_path = write_filtered_project_fixture(&root);
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[native.targets]]\nname = \"app-native\"\nout_dir = \"target/mf2/native\"\nmodule_name = \"native_i18n\"\nlocales = [\"en\"]\nnamespaces = [\"common\"]\n\n[[leptos.targets]]\nname = \"app\"\nnative_target = \"app-native\"\nout_dir = \"src/generated/i18n\"\nmodule_name = \"app_i18n\"\nsync_html_lang = false\n",
+        )
+        .expect("config");
+
+        let out_dir = root.join("cargo-out");
+        let output = build_leptos_target(
+            &LeptosTargetBuildOptions::new(&config_path, "app").with_out_dir(&out_dir),
+        )
+        .expect("build");
+
+        assert_eq!(output.out_dir(), out_dir);
+        assert_eq!(
+            output.generated_module_path(),
+            root.join("cargo-out/app_i18n.rs")
+        );
+        let generated_module =
+            fs::read_to_string(output.generated_module_path()).expect("generated module");
+        assert!(
+            generated_module
+                .contains("pub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = None;")
+        );
+        assert!(generated_module.contains("pub const LEPTOS_SYNC_HTML_LANG: bool = false;"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn leptos_target_rejects_unknown_document_title_key() {
+        let root = temp_dir("leptos_unknown_title");
+        let config_path = write_filtered_project_fixture(&root);
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[native.targets]]\nname = \"app-native\"\nout_dir = \"target/mf2/native\"\nmodule_name = \"native_i18n\"\nlocales = [\"en\"]\nnamespaces = [\"common\"]\n\n[[leptos.targets]]\nname = \"app\"\nnative_target = \"app-native\"\nout_dir = \"src/generated/i18n\"\nmodule_name = \"app_i18n\"\ndocument_title_key = \"admin.panel.title\"\n",
+        )
+        .expect("config");
+
+        let err = build_leptos_target(&LeptosTargetBuildOptions::new(&config_path, "app"))
+            .expect_err("title key should fail");
+
+        assert!(matches!(
+            err,
+            LeptosTargetBuildError::UnknownDocumentTitleKey { target, key }
+                if target == "app" && key == "admin.panel.title"
         ));
 
         fs::remove_dir_all(&root).ok();

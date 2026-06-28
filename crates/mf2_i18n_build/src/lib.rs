@@ -62,9 +62,11 @@ pub use crate::project_catalogs::{
     ProjectCatalogMessage, load_project_catalogs, load_project_catalogs_with_options,
 };
 pub use crate::project_pipeline::{
-    CargoNativeModuleBuildOptions, NativeModuleBuildError, NativeModuleBuildOptions,
+    CargoNativeModuleBuildOptions, LeptosTargetBuildError, LeptosTargetBuildOptions,
+    LeptosTargetBuildOutput, NativeModuleBuildError, NativeModuleBuildOptions,
     NativeModuleBuildOutput, ProjectRuntimeBuildOptions, ProjectRuntimeBuildOutput,
-    build_native_module, build_native_module_for_cargo, build_project_runtime_artifacts,
+    build_leptos_target, build_native_module, build_native_module_for_cargo,
+    build_project_runtime_artifacts,
 };
 pub use crate::web::{
     WEB_ARTIFACT_MANIFEST_FILE, WEB_ARTIFACT_MANIFEST_SCHEMA, WebArtifactError, WebArtifactFile,
