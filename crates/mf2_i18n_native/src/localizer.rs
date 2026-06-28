@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use mf2_i18n_core::{Args, FormatBackend, LanguageTag, MessageId, negotiate_lookup};
 use mf2_i18n_embedded::{EmbeddedPack, EmbeddedRuntime};
@@ -20,6 +20,7 @@ pub struct NativeLocalizer {
     supported_locales: Vec<LanguageTag>,
     preferred_locales: RwLock<Vec<String>>,
     active_locale: RwLock<String>,
+    format_backends: RwLock<BTreeMap<String, Arc<StdFormatBackend>>>,
 }
 
 impl NativeLocalizer {
@@ -30,6 +31,7 @@ impl NativeLocalizer {
             supported_locales: Vec::new(),
             preferred_locales: RwLock::new(vec![default_locale.to_owned()]),
             active_locale: RwLock::new(default_locale.to_owned()),
+            format_backends: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -66,6 +68,7 @@ impl NativeLocalizer {
             supported_locales,
             preferred_locales: RwLock::new(vec![default_locale.clone()]),
             active_locale: RwLock::new(default_locale),
+            format_backends: RwLock::new(BTreeMap::new()),
         })
     }
 
@@ -87,6 +90,7 @@ impl NativeLocalizer {
             supported_locales,
             preferred_locales: RwLock::new(vec![default_locale.clone()]),
             active_locale: RwLock::new(default_locale.clone()),
+            format_backends: RwLock::new(BTreeMap::new()),
             default_locale,
         })
     }
@@ -206,9 +210,8 @@ impl NativeLocalizer {
     }
 
     pub fn format_locale(&self, locale: &str, key: &str, args: &Args) -> NativeResult<String> {
-        let backend =
-            StdFormatBackend::new(locale).map_err(|err| NativeError::Core(err.to_string()))?;
-        self.format_locale_with_backend(locale, key, args, &backend)
+        let backend = self.format_backend(locale)?;
+        self.format_locale_with_backend(locale, key, args, backend.as_ref())
     }
 
     pub fn format_with_backend(
@@ -237,6 +240,32 @@ impl NativeLocalizer {
             }
             None => Err(NativeError::NotInitialized),
         }
+    }
+
+    fn format_backend(&self, locale: &str) -> NativeResult<Arc<StdFormatBackend>> {
+        let cache_key = LanguageTag::parse(locale)?.normalized().to_owned();
+        if let Ok(guard) = self.format_backends.read() {
+            if let Some(backend) = guard.get(&cache_key) {
+                return Ok(Arc::clone(backend));
+            }
+        }
+
+        let backend = Arc::new(StdFormatBackend::new(&cache_key)?);
+        if let Ok(mut guard) = self.format_backends.write() {
+            let backend = guard
+                .entry(cache_key)
+                .or_insert_with(|| Arc::clone(&backend));
+            return Ok(Arc::clone(backend));
+        }
+        Ok(backend)
+    }
+
+    #[cfg(test)]
+    fn format_backend_cache_len(&self) -> usize {
+        self.format_backends
+            .read()
+            .map(|guard| guard.len())
+            .unwrap_or_default()
     }
 
     fn select_locale(&self, requested: &[LanguageTag]) -> String {
@@ -294,9 +323,10 @@ mod tests {
     use mf2_i18n_build::compiler::compile_message;
     use mf2_i18n_build::pack_encode::{PackBuildInput, encode_pack};
     use mf2_i18n_build::parser::parse_message;
-    use mf2_i18n_core::{Args, MessageId, PackKind};
+    use mf2_i18n_core::{Args, CoreError, MessageId, PackKind, Value};
     use mf2_i18n_embedded::EmbeddedPack;
     use mf2_i18n_runtime::IdMap;
+    use mf2_i18n_std::StdFormatError;
     use sha2::{Digest, Sha256};
     use std::collections::BTreeMap;
     use std::fs;
@@ -548,6 +578,174 @@ mod tests {
             localizer.format("home.total", &args).expect("format"),
             "12\u{202f}345,5"
         );
+        assert_eq!(localizer.format_backend_cache_len(), 1);
+    }
+
+    #[test]
+    fn caches_format_backends_by_normalized_locale() {
+        let id_map_json = br#"{"home.total": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let en_pack = build_pack_bytes(id_map_hash, "en", "{ $count:number }");
+        let fr_pack = build_pack_bytes(id_map_hash, "fr", "{ $count:number }");
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [
+            EmbeddedPack {
+                locale: "en",
+                bytes: &en_pack,
+            },
+            EmbeddedPack {
+                locale: "fr",
+                bytes: &fr_pack,
+            },
+        ];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+
+        let mut args = Args::new();
+        args.insert("count", Value::Num(12345.5));
+
+        assert_eq!(localizer.format_backend_cache_len(), 0);
+        assert_eq!(
+            localizer
+                .format_locale("en-us", "home.total", &args)
+                .expect("en-us"),
+            "12,345.5"
+        );
+        assert_eq!(localizer.format_backend_cache_len(), 1);
+        assert_eq!(
+            localizer
+                .format_locale("en-US", "home.total", &args)
+                .expect("en-US"),
+            "12,345.5"
+        );
+        assert_eq!(localizer.format_backend_cache_len(), 1);
+        localizer.set_locale("fr-BE").expect("locale");
+        assert_eq!(
+            localizer.format("home.total", &args).expect("fr-BE"),
+            "12\u{202f}345,5"
+        );
+        assert_eq!(localizer.format_backend_cache_len(), 2);
+    }
+
+    #[test]
+    fn native_errors_preserve_typed_core_failures() {
+        let id_map_json = br#"{"home.total": 0}"#;
+        let id_map = IdMap::from_bytes(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let pack = build_pack_bytes(id_map_hash, "en", "{ $count:number }");
+        let hash_literal = format!("sha256:{}", hex::encode(id_map_hash));
+        let packs = [EmbeddedPack {
+            locale: "en",
+            bytes: &pack,
+        }];
+        let localizer = NativeLocalizer::from_embedded_artifacts(
+            "en",
+            id_map_json,
+            hash_literal.as_bytes(),
+            &packs,
+        )
+        .expect("localizer");
+
+        assert!(matches!(
+            localizer.tr("missing.key").expect_err("missing message"),
+            crate::NativeError::Core(CoreError::InvalidInput("missing message"))
+        ));
+        assert!(matches!(
+            localizer
+                .format("home.total", &Args::new())
+                .expect_err("missing arg"),
+            crate::NativeError::Core(CoreError::InvalidInput("missing argument"))
+        ));
+
+        let mut args = Args::new();
+        args.insert("count", Value::Str("many".to_string()));
+        assert!(matches!(
+            localizer
+                .format("home.total", &args)
+                .expect_err("invalid arg"),
+            crate::NativeError::Core(CoreError::InvalidInput("formatter expects number"))
+        ));
+        assert!(matches!(
+            localizer
+                .format_locale("en_us", "home.total", &args)
+                .expect_err("invalid locale"),
+            crate::NativeError::Core(CoreError::InvalidInput("invalid language subtag"))
+        ));
+    }
+
+    #[test]
+    fn native_errors_preserve_typed_runtime_and_backend_failures() {
+        let root = temp_dir();
+        let packs_dir = root.join("packs");
+        fs::create_dir_all(&packs_dir).expect("packs");
+
+        let id_map_json = r#"{"home.total": 0}"#;
+        let id_map = IdMap::from_json(id_map_json).expect("id map");
+        let id_map_hash = id_map.hash().expect("hash");
+        let pack_bytes = build_pack_bytes(id_map_hash, "en", "{ $count:number }");
+        let pack_path = packs_dir.join("en.mf2pack");
+        fs::write(&pack_path, &pack_bytes).expect("write pack");
+
+        let mut mf2_packs = BTreeMap::new();
+        mf2_packs.insert(
+            "en".to_string(),
+            mf2_i18n_runtime::PackEntry {
+                kind: "base".to_string(),
+                url: "packs/en.mf2pack".to_string(),
+                hash: format!("sha256:{}", hex::encode(sha256(&pack_bytes))),
+                size: pack_bytes.len() as u64,
+                content_encoding: "identity".to_string(),
+                pack_schema: 0,
+                parent: None,
+            },
+        );
+
+        let manifest = mf2_i18n_runtime::Manifest {
+            schema: 1,
+            release_id: "r1".to_string(),
+            generated_at: "2026-02-01T00:00:00Z".to_string(),
+            default_locale: "en".to_string(),
+            supported_locales: vec!["en".to_string()],
+            id_map_hash: format!("sha256:{}", hex::encode(id_map_hash)),
+            mf2_packs,
+            icu_packs: None,
+            micro_locales: None,
+            budgets: None,
+            signing: None,
+        };
+
+        let manifest_path = root.join("manifest.json");
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("json"),
+        )
+        .expect("write manifest");
+        let id_map_path = root.join("id_map.json");
+        fs::write(&id_map_path, id_map_json).expect("write id map");
+
+        let localizer =
+            NativeLocalizer::from_paths(&manifest_path, &id_map_path).expect("localizer");
+
+        assert!(matches!(
+            localizer.tr("missing.key").expect_err("missing message"),
+            crate::NativeError::Runtime(mf2_i18n_runtime::RuntimeError::MissingMessage(key))
+                if key == "missing.key"
+        ));
+        assert!(matches!(
+            localizer
+                .format_locale("zz", "home.total", &Args::new())
+                .expect_err("format backend"),
+            crate::NativeError::Format(StdFormatError::MissingPluralRules(locale))
+                if locale == "zz"
+        ));
+
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

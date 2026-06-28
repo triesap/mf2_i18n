@@ -1,5 +1,6 @@
 use mf2_i18n_core::CoreError;
 use mf2_i18n_runtime::RuntimeError;
+use mf2_i18n_std::StdFormatError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -10,14 +11,16 @@ pub enum NativeError {
     Utf8(#[from] std::str::Utf8Error),
     #[error("runtime error: {0}")]
     Runtime(#[from] RuntimeError),
+    #[error("format backend error: {0}")]
+    Format(#[from] StdFormatError),
     #[error("core error: {0}")]
-    Core(String),
+    Core(CoreError),
 }
 
 pub type NativeResult<T> = Result<T, NativeError>;
 
 impl From<CoreError> for NativeError {
     fn from(value: CoreError) -> Self {
-        Self::Core(value.to_string())
+        Self::Core(value)
     }
 }
