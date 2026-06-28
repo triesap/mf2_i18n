@@ -37,6 +37,14 @@ pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
     let mut build_options =
         NativeModuleBuildOptions::new(&options.config_path, out_dir, &target.module_name);
 
+    if !target.locales.is_empty() {
+        build_options = build_options.with_locales(target.locales.clone());
+    }
+
+    if !target.namespaces.is_empty() {
+        build_options = build_options.with_namespaces(target.namespaces.clone());
+    }
+
     if let Some(module_macro_path) = target.module_macro_path() {
         build_options = build_options.with_module_macro_path(module_macro_path);
     }
@@ -73,6 +81,15 @@ mod tests {
         path.push(format!("mf2_i18n_build_{}_{}", std::process::id(), id));
         fs::create_dir_all(&path).expect("dir");
         path
+    }
+
+    fn write_catalog(path: PathBuf, messages: &[(&str, &str)]) {
+        let contents = messages
+            .iter()
+            .map(|(key, value)| format!("  {key:?}: {value:?}"))
+            .collect::<Vec<_>>()
+            .join(",\n");
+        fs::write(path, format!("{{\n{contents}\n}}\n")).expect("write");
     }
 
     #[test]
@@ -114,6 +131,81 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
                 .expect("id map")
                 .contains("\"common.home.title\"")
         );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_honors_native_target_filters() {
+        let dir = temp_dir();
+        for locale in ["en", "es", "fr"] {
+            fs::create_dir_all(dir.join("locales").join(locale)).expect("locale");
+        }
+        write_catalog(
+            dir.join("locales/en/common.json"),
+            &[("home.title", "Hi"), ("cart.count", "{ $count :number }")],
+        );
+        write_catalog(
+            dir.join("locales/en/admin.json"),
+            &[("panel.title", "Admin")],
+        );
+        write_catalog(
+            dir.join("locales/es/common.json"),
+            &[("home.title", "Hola"), ("cart.count", "{ $count :number }")],
+        );
+        write_catalog(
+            dir.join("locales/es/admin.json"),
+            &[("panel.title", "Administracion")],
+        );
+        write_catalog(
+            dir.join("locales/fr/common.json"),
+            &[
+                ("home.title", "Salut"),
+                ("cart.count", "{ $count :number }"),
+            ],
+        );
+        write_catalog(
+            dir.join("locales/fr/admin.json"),
+            &[("panel.title", "Admin")],
+        );
+        fs::write(dir.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = dir.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[native.targets]]\nname = \"app\"\nout_dir = \"generated/native\"\nmodule_name = \"app_i18n\"\nlocales = [\"en\", \"es\"]\nnamespaces = [\"common\"]\n",
+        )
+        .expect("config");
+
+        let out_dir = dir.join("out");
+        run_build(&BuildOptions {
+            config_path,
+            target_name: "app".to_string(),
+            out_dir: Some(out_dir.clone()),
+        })
+        .expect("build");
+
+        let artifact_dir = out_dir.join("app_i18n");
+        assert!(artifact_dir.join("packs/en.mf2pack").exists());
+        assert!(artifact_dir.join("packs/es.mf2pack").exists());
+        assert!(!artifact_dir.join("packs/fr.mf2pack").exists());
+
+        let id_map_json = fs::read_to_string(artifact_dir.join("id-map.json")).expect("id map");
+        assert!(id_map_json.contains("\"common.home.title\""));
+        assert!(!id_map_json.contains("\"admin.panel.title\""));
+
+        let generated_module =
+            fs::read_to_string(artifact_dir.join("generated_module.rs")).expect("module");
+        assert!(generated_module.contains("CommonHomeTitle"));
+        assert!(generated_module.contains("CommonCartCount"));
+        assert!(!generated_module.contains("AdminPanelTitle"));
+        assert!(
+            generated_module.contains("pub const SUPPORTED_LOCALES: &[&str] = &[\"en\", \"es\"]")
+        );
+        assert!(generated_module.contains("/app_i18n/packs/en.mf2pack"));
+        assert!(generated_module.contains("/app_i18n/packs/es.mf2pack"));
+        assert!(!generated_module.contains("/app_i18n/packs/fr.mf2pack"));
 
         fs::remove_dir_all(&dir).ok();
     }

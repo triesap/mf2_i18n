@@ -113,6 +113,8 @@ pub struct NativeModuleBuildOptions {
     release_id: String,
     generated_at: String,
     module_macro_path: String,
+    locale_filter: Vec<String>,
+    namespace_filter: Vec<String>,
 }
 
 impl NativeModuleBuildOptions {
@@ -129,6 +131,8 @@ impl NativeModuleBuildOptions {
             artifact_dir_name,
             generated_at: DEFAULT_GENERATED_AT.to_owned(),
             module_macro_path: DEFAULT_MODULE_MACRO_PATH.to_owned(),
+            locale_filter: Vec::new(),
+            namespace_filter: Vec::new(),
         }
     }
 
@@ -144,6 +148,24 @@ impl NativeModuleBuildOptions {
 
     pub fn with_module_macro_path(mut self, module_macro_path: impl Into<String>) -> Self {
         self.module_macro_path = module_macro_path.into();
+        self
+    }
+
+    pub fn with_locales<I, S>(mut self, locales: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.locale_filter = locales.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn with_namespaces<I, S>(mut self, namespaces: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.namespace_filter = namespaces.into_iter().map(Into::into).collect();
         self
     }
 
@@ -169,6 +191,14 @@ impl NativeModuleBuildOptions {
 
     pub fn module_macro_path(&self) -> &str {
         &self.module_macro_path
+    }
+
+    pub fn locale_filter(&self) -> &[String] {
+        &self.locale_filter
+    }
+
+    pub fn namespace_filter(&self) -> &[String] {
+        &self.namespace_filter
     }
 }
 
@@ -496,12 +526,16 @@ pub fn build_native_module(
 ) -> Result<NativeModuleBuildOutput, NativeModuleBuildError> {
     validate_options(options)?;
 
-    let runtime_output = build_project_runtime_artifacts(&ProjectRuntimeBuildOptions::new(
-        options.config_path(),
-        options.out_dir().join(options.artifact_dir_name()),
-        options.release_id(),
-        options.generated_at(),
-    ))?;
+    let runtime_output = build_project_runtime_artifacts(
+        &ProjectRuntimeBuildOptions::new(
+            options.config_path(),
+            options.out_dir().join(options.artifact_dir_name()),
+            options.release_id(),
+            options.generated_at(),
+        )
+        .with_locales(options.locale_filter().iter().cloned())
+        .with_namespaces(options.namespace_filter().iter().cloned()),
+    )?;
 
     let generated_message_keys =
         build_generated_message_keys(runtime_output.default_catalog_keys())?;
@@ -1279,6 +1313,158 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         let id_map_json = fs::read_to_string(output.id_map_path()).expect("id map");
         assert!(id_map_json.contains("\"common.home.title\""));
         assert!(!id_map_json.contains("\"admin.panel.title\""));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn native_module_supports_locale_filters() {
+        let root = temp_dir("native_locale_filter");
+        let config_path = write_filtered_project_fixture(&root);
+        let out_dir = root.join("out");
+
+        let output = build_native_module(
+            &NativeModuleBuildOptions::new(&config_path, &out_dir, "app_i18n")
+                .with_locales(["en", "es"]),
+        )
+        .expect("build");
+
+        assert_eq!(
+            output.supported_locales(),
+            &["en".to_string(), "es".to_string()]
+        );
+        assert_eq!(
+            output.default_catalog_keys(),
+            &[
+                "admin.panel.title".to_string(),
+                "common.cart.count".to_string(),
+                "common.home.title".to_string()
+            ]
+        );
+        assert!(output.packs_dir().join("en.mf2pack").exists());
+        assert!(output.packs_dir().join("es.mf2pack").exists());
+        assert!(!output.packs_dir().join("fr.mf2pack").exists());
+
+        let generated_module =
+            fs::read_to_string(output.generated_module_path()).expect("generated module");
+        assert!(generated_module.contains("AdminPanelTitle"));
+        assert!(generated_module.contains("CommonHomeTitle"));
+        assert!(generated_module.contains("/app_i18n/packs/en.mf2pack"));
+        assert!(generated_module.contains("/app_i18n/packs/es.mf2pack"));
+        assert!(!generated_module.contains("/app_i18n/packs/fr.mf2pack"));
+        assert!(
+            generated_module.contains("pub const SUPPORTED_LOCALES: &[&str] = &[\"en\", \"es\"]")
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn native_module_supports_namespace_filters() {
+        let root = temp_dir("native_namespace_filter");
+        let config_path = write_filtered_project_fixture(&root);
+        let out_dir = root.join("out");
+
+        let output = build_native_module(
+            &NativeModuleBuildOptions::new(&config_path, &out_dir, "app_i18n")
+                .with_namespaces(["common"]),
+        )
+        .expect("build");
+
+        assert_eq!(
+            output.supported_locales(),
+            &["en".to_string(), "es".to_string(), "fr".to_string()]
+        );
+        assert_eq!(
+            output.default_catalog_keys(),
+            &[
+                "common.cart.count".to_string(),
+                "common.home.title".to_string()
+            ]
+        );
+        assert!(output.packs_dir().join("en.mf2pack").exists());
+        assert!(output.packs_dir().join("es.mf2pack").exists());
+        assert!(output.packs_dir().join("fr.mf2pack").exists());
+
+        let id_map_json = fs::read_to_string(output.id_map_path()).expect("id map");
+        assert!(id_map_json.contains("\"common.home.title\""));
+        assert!(!id_map_json.contains("\"admin.panel.title\""));
+
+        let generated_module =
+            fs::read_to_string(output.generated_module_path()).expect("generated module");
+        assert!(generated_module.contains("CommonHomeTitle"));
+        assert!(generated_module.contains("CommonCartCount"));
+        assert!(!generated_module.contains("AdminPanelTitle"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn native_module_supports_locale_and_namespace_filters() {
+        let root = temp_dir("native_combined_filter");
+        let config_path = write_filtered_project_fixture(&root);
+        let out_dir = root.join("out");
+
+        let output = build_native_module(
+            &NativeModuleBuildOptions::new(&config_path, &out_dir, "app_i18n")
+                .with_locales(["en", "es"])
+                .with_namespaces(["common"]),
+        )
+        .expect("build");
+
+        assert_eq!(
+            output.supported_locales(),
+            &["en".to_string(), "es".to_string()]
+        );
+        assert_eq!(
+            output.default_catalog_keys(),
+            &[
+                "common.cart.count".to_string(),
+                "common.home.title".to_string()
+            ]
+        );
+        assert!(output.packs_dir().join("en.mf2pack").exists());
+        assert!(output.packs_dir().join("es.mf2pack").exists());
+        assert!(!output.packs_dir().join("fr.mf2pack").exists());
+
+        let id_map_json = fs::read_to_string(output.id_map_path()).expect("id map");
+        assert!(id_map_json.contains("\"common.home.title\""));
+        assert!(!id_map_json.contains("\"admin.panel.title\""));
+
+        let generated_module =
+            fs::read_to_string(output.generated_module_path()).expect("generated module");
+        assert!(generated_module.contains("CommonHomeTitle"));
+        assert!(generated_module.contains("CommonCartCount"));
+        assert!(!generated_module.contains("AdminPanelTitle"));
+        assert!(
+            generated_module.contains("pub const SUPPORTED_LOCALES: &[&str] = &[\"en\", \"es\"]")
+        );
+
+        let generated_catalog =
+            fs::read_to_string(output.generated_catalog_path()).expect("generated catalog");
+        assert!(generated_catalog.contains("\"en\", \"es\""));
+        assert!(generated_catalog.contains("\"common.home.title\""));
+        assert!(!generated_catalog.contains("\"admin.panel.title\""));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn native_module_rejects_filters_without_default_locale() {
+        let root = temp_dir("native_default_filtered");
+        let config_path = write_filtered_project_fixture(&root);
+
+        let err = build_native_module(
+            &NativeModuleBuildOptions::new(&config_path, root.join("out"), "app_i18n")
+                .with_locales(["es"]),
+        )
+        .expect_err("filtered default locale should fail");
+
+        assert!(matches!(
+            err,
+            NativeModuleBuildError::Catalogs(ProjectCatalogError::MissingDefaultLocale(locale))
+                if locale == "en"
+        ));
 
         fs::remove_dir_all(&root).ok();
     }
