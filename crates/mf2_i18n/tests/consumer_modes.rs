@@ -250,6 +250,9 @@ mod tests {
     use super::{
         HomepageWelcomeArgs, LEPTOS_MODULE_NAME, MessageKey, leptos_document_title_key,
         leptos_sync_html_lang, localizer, t_homepage_title, t_homepage_welcome,
+        text_homepage_title, text_homepage_title_or_key, text_homepage_title_signal,
+        text_homepage_welcome, text_homepage_welcome_signal, try_text_homepage_title,
+        try_text_homepage_welcome,
     };
 
     #[derive(Clone, Default)]
@@ -285,12 +288,30 @@ mod tests {
             let context = mf2_i18n::leptos::provide_i18n_with_locale(localizer(), "es")
                 .expect("context");
             let args = HomepageWelcomeArgs::new("Nova");
+            let title_signal = text_homepage_title_signal(&context);
+            let welcome_signal =
+                text_homepage_welcome_signal(&context, || HomepageWelcomeArgs::new("Nova"));
 
             assert_eq!(context.text_or_key(MessageKey::HomepageTitle), "Raices");
             assert_eq!(
                 context.text_with_args(MessageKey::HomepageWelcome, args.as_args()),
                 "Hola Nova"
             );
+            assert_eq!(try_text_homepage_title(&context).expect("title"), "Raices");
+            assert_eq!(text_homepage_title(&context), "Raices");
+            assert_eq!(text_homepage_title_or_key(&context), "Raices");
+            assert_eq!(
+                try_text_homepage_welcome(&context, &args).expect("welcome"),
+                "Hola Nova"
+            );
+            assert_eq!(text_homepage_welcome(&context, &args), "Hola Nova");
+            assert_eq!(title_signal(), "Raices");
+            assert_eq!(welcome_signal(), "Hola Nova");
+
+            context.set_locale("en").expect("locale");
+
+            assert_eq!(title_signal(), "Radroots");
+            assert_eq!(welcome_signal(), "Welcome Nova");
         });
     }
 

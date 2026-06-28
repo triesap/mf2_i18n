@@ -784,6 +784,8 @@ pub fn build_leptos_target(
             leptos_target,
             native_target,
             document_title_variant.as_deref(),
+            &generated_keys,
+            native_output.default_message_metadata(),
         ),
     )?;
 
@@ -856,14 +858,52 @@ fn render_generated_leptos_module(
     leptos_target: &LeptosTargetConfig,
     native_target: &NativeTargetConfig,
     document_title_variant: Option<&str>,
+    generated_message_keys: &[GeneratedMessageKey],
+    message_metadata: &[MessageMetadata],
 ) -> String {
     let native_module_path = format!("{}/{}", native_target.module_name, GENERATED_MODULE_FILE);
     let document_title_key = document_title_variant
         .map(|variant| format!("Some(MessageKey::{variant})"))
         .unwrap_or_else(|| "None".to_string());
+    let helpers_source = render_generated_leptos_helpers(generated_message_keys, message_metadata);
     format!(
-        "include!({native_module_path:?});\n\npub const LEPTOS_MODULE_NAME: &str = {:?};\npub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = {document_title_key};\npub const LEPTOS_SYNC_HTML_LANG: bool = {};\n\npub fn leptos_document_title_key() -> Option<MessageKey> {{\n    LEPTOS_DOCUMENT_TITLE_KEY\n}}\n\npub fn leptos_sync_html_lang() -> bool {{\n    LEPTOS_SYNC_HTML_LANG\n}}\n",
+        "include!({native_module_path:?});\n\npub const LEPTOS_MODULE_NAME: &str = {:?};\npub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = {document_title_key};\npub const LEPTOS_SYNC_HTML_LANG: bool = {};\n\npub fn leptos_document_title_key() -> Option<MessageKey> {{\n    LEPTOS_DOCUMENT_TITLE_KEY\n}}\n\npub fn leptos_sync_html_lang() -> bool {{\n    LEPTOS_SYNC_HTML_LANG\n}}\n\npub fn try_text(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    context.try_text(key)\n}}\n\npub fn text(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> String {{\n    context.text(key)\n}}\n\npub fn text_or_key(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> String {{\n    context.text_or_key(key)\n}}\n\npub fn try_text_with_args(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    context.try_text_with_args(key, args)\n}}\n\npub fn text_with_args(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    context.text_with_args(key, args)\n}}\n\npub fn text_with_args_or_key(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    context.text_with_args_or_key(key, args)\n}}\n\npub fn try_text_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> mf2_i18n::NativeResult<String> + Clone + 'static {{\n    context.try_text_signal(key)\n}}\n\npub fn text_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> String + Clone + 'static {{\n    context.text_signal(key)\n}}\n\npub fn text_or_key_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> String + Clone + 'static {{\n    context.text_or_key_signal(key)\n}}\n",
         leptos_target.module_name, leptos_target.sync_html_lang
+    ) + &helpers_source
+}
+
+fn render_generated_leptos_helpers(
+    generated_message_keys: &[GeneratedMessageKey],
+    message_metadata: &[MessageMetadata],
+) -> String {
+    let metadata_by_id = message_metadata
+        .iter()
+        .map(|metadata| (metadata.id.as_str(), metadata))
+        .collect::<BTreeMap<_, _>>();
+    generated_message_keys
+        .iter()
+        .map(|key| {
+            let args = metadata_by_id
+                .get(key.id.as_str())
+                .map(|metadata| metadata.args.as_slice())
+                .unwrap_or_default();
+            render_generated_leptos_typed_helpers(key, args)
+        })
+        .collect::<String>()
+}
+
+fn render_generated_leptos_typed_helpers(key: &GeneratedMessageKey, args: &[MessageArg]) -> String {
+    let suffix = variant_function_suffix(&key.variant);
+    let variant = &key.variant;
+    if args.is_empty() {
+        return format!(
+            "\npub fn try_text_{suffix}(context: &mf2_i18n::leptos::I18nContext) -> mf2_i18n::NativeResult<String> {{\n    try_text(context, MessageKey::{variant})\n}}\n\npub fn text_{suffix}(context: &mf2_i18n::leptos::I18nContext) -> String {{\n    text(context, MessageKey::{variant})\n}}\n\npub fn text_{suffix}_or_key(context: &mf2_i18n::leptos::I18nContext) -> String {{\n    text_or_key(context, MessageKey::{variant})\n}}\n\npub fn try_text_{suffix}_signal(context: &mf2_i18n::leptos::I18nContext) -> impl Fn() -> mf2_i18n::NativeResult<String> + Clone + 'static {{\n    try_text_signal(context, MessageKey::{variant})\n}}\n\npub fn text_{suffix}_signal(context: &mf2_i18n::leptos::I18nContext) -> impl Fn() -> String + Clone + 'static {{\n    text_signal(context, MessageKey::{variant})\n}}\n\npub fn text_{suffix}_or_key_signal(context: &mf2_i18n::leptos::I18nContext) -> impl Fn() -> String + Clone + 'static {{\n    text_or_key_signal(context, MessageKey::{variant})\n}}\n"
+        );
+    }
+
+    let struct_name = generated_args_struct_name(key);
+    format!(
+        "\npub fn try_text_{suffix}(context: &mf2_i18n::leptos::I18nContext, args: &{struct_name}) -> mf2_i18n::NativeResult<String> {{\n    try_text_with_args(context, MessageKey::{variant}, args.as_args())\n}}\n\npub fn text_{suffix}(context: &mf2_i18n::leptos::I18nContext, args: &{struct_name}) -> String {{\n    text_with_args(context, MessageKey::{variant}, args.as_args())\n}}\n\npub fn text_{suffix}_or_key(context: &mf2_i18n::leptos::I18nContext, args: &{struct_name}) -> String {{\n    text_with_args_or_key(context, MessageKey::{variant}, args.as_args())\n}}\n\npub fn try_text_{suffix}_signal<F>(context: &mf2_i18n::leptos::I18nContext, args: F) -> impl Fn() -> mf2_i18n::NativeResult<String> + Clone + 'static\nwhere\n    F: Fn() -> {struct_name} + Clone + 'static,\n{{\n    let context = context.clone();\n    move || {{\n        let args = args();\n        context.try_text_with_args(MessageKey::{variant}, args.as_args())\n    }}\n}}\n\npub fn text_{suffix}_signal<F>(context: &mf2_i18n::leptos::I18nContext, args: F) -> impl Fn() -> String + Clone + 'static\nwhere\n    F: Fn() -> {struct_name} + Clone + 'static,\n{{\n    let context = context.clone();\n    move || {{\n        let args = args();\n        context.text_with_args(MessageKey::{variant}, args.as_args())\n    }}\n}}\n\npub fn text_{suffix}_or_key_signal<F>(context: &mf2_i18n::leptos::I18nContext, args: F) -> impl Fn() -> String + Clone + 'static\nwhere\n    F: Fn() -> {struct_name} + Clone + 'static,\n{{\n    let context = context.clone();\n    move || {{\n        let args = args();\n        context.text_with_args_or_key(MessageKey::{variant}, args.as_args())\n    }}\n}}\n"
     )
 }
 
@@ -1501,6 +1541,21 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
             "pub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = Some(MessageKey::HomepageTitle);"
         ));
         assert!(generated_module.contains("pub const LEPTOS_SYNC_HTML_LANG: bool = true;"));
+        assert!(
+            generated_module.contains(
+                "pub fn try_text(context: &mf2_i18n::leptos::I18nContext, key: MessageKey)"
+            )
+        );
+        assert!(generated_module.contains(
+            "pub fn text_homepage_title(context: &mf2_i18n::leptos::I18nContext) -> String"
+        ));
+        assert!(generated_module.contains(
+            "pub fn text_homepage_title_signal(context: &mf2_i18n::leptos::I18nContext)"
+        ));
+        assert!(generated_module.contains(
+            "pub fn text_homepage_welcome(context: &mf2_i18n::leptos::I18nContext, args: &HomepageWelcomeArgs) -> String"
+        ));
+        assert!(generated_module.contains("F: Fn() -> HomepageWelcomeArgs + Clone + 'static,"));
 
         fs::remove_dir_all(&root).ok();
     }
