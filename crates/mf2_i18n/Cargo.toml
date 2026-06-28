@@ -19,6 +19,7 @@ default = []
 runtime = ["dep:mf2_i18n_runtime", "std_backend"]
 embedded = ["dep:mf2_i18n_embedded"]
 native = ["dep:mf2_i18n_native", "runtime", "embedded"]
+leptos = ["dep:mf2_i18n_leptos", "native"]
 build = ["dep:mf2_i18n_build"]
 std_backend = ["dep:mf2_i18n_std"]
 dto-bindgen = [
@@ -32,6 +33,7 @@ dto-bindgen = [
 mf2_i18n_build = { workspace = true, optional = true }
 mf2_i18n_core = { workspace = true }
 mf2_i18n_embedded = { workspace = true, optional = true }
+mf2_i18n_leptos = { workspace = true, optional = true }
 mf2_i18n_native = { workspace = true, optional = true }
 mf2_i18n_runtime = { workspace = true, optional = true }
 mf2_i18n_std = { workspace = true, optional = true }

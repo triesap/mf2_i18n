@@ -62,6 +62,11 @@ pub mod embedded {
     pub use mf2_i18n_embedded::*;
 }
 
+#[cfg(feature = "leptos")]
+pub mod leptos {
+    pub use mf2_i18n_leptos::*;
+}
+
 #[cfg(feature = "native")]
 pub mod native {
     pub use mf2_i18n_native::*;
