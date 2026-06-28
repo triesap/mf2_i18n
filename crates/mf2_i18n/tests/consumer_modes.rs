@@ -160,6 +160,33 @@ pub fn smoke(context: mf2_i18n::leptos::I18nContext) -> String {
 }
 
 #[test]
+fn supports_combined_leptos_build_consumer_mode() {
+    assert_inline_fixture_builds(
+        "leptos_build",
+        r#"["build", "leptos"]"#,
+        r#"
+#[derive(Clone, Copy)]
+enum Key {
+    HomeTitle,
+}
+
+impl mf2_i18n::leptos::I18nMessageKey for Key {
+    fn id(self) -> &'static str {
+        match self {
+            Self::HomeTitle => "home.title",
+        }
+    }
+}
+
+pub fn smoke(context: mf2_i18n::leptos::I18nContext) -> String {
+    let _options = mf2_i18n::LeptosTargetBuildOptions::new("mf2_i18n.toml", "app");
+    context.text_or_key(Key::HomeTitle)
+}
+"#,
+    );
+}
+
+#[test]
 fn supports_homepage_shaped_leptos_consumer_workflow() {
     let fixture_dir = unique_target_dir("homepage_leptos_fixture");
     write_file(
