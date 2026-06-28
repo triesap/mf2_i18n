@@ -55,7 +55,7 @@ pub struct I18nContext {
 
 impl I18nContext {
     pub fn new(localizer: &'static NativeLocalizer) -> Self {
-        Self::new_with_locale(localizer, localizer.locale())
+        Self::new_with_locale(localizer, localizer.default_locale())
     }
 
     pub fn new_with_locale(localizer: &'static NativeLocalizer, locale: impl Into<String>) -> Self {
@@ -63,6 +63,25 @@ impl I18nContext {
             localizer,
             locale: RwSignal::new(locale.into()),
         }
+    }
+
+    pub fn try_new_with_locale(
+        localizer: &'static NativeLocalizer,
+        locale: &str,
+    ) -> NativeResult<Self> {
+        Self::try_new_with_preferred_locales(localizer, [locale])
+    }
+
+    pub fn try_new_with_preferred_locales<I, S>(
+        localizer: &'static NativeLocalizer,
+        preferred_locales: I,
+    ) -> NativeResult<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let selected = localizer.negotiate_locale(preferred_locales)?;
+        Ok(Self::new_with_locale(localizer, selected))
     }
 
     pub fn localizer(&self) -> &'static NativeLocalizer {
@@ -238,8 +257,20 @@ pub fn provide_i18n_with_locale(
     localizer: &'static NativeLocalizer,
     locale: &str,
 ) -> NativeResult<I18nContext> {
-    let selected = localizer.negotiate_locale([locale])?;
-    let context = I18nContext::new_with_locale(localizer, selected);
+    let context = I18nContext::try_new_with_locale(localizer, locale)?;
+    provide_context(context.clone());
+    Ok(context)
+}
+
+pub fn provide_i18n_with_preferred_locales<I, S>(
+    localizer: &'static NativeLocalizer,
+    preferred_locales: I,
+) -> NativeResult<I18nContext>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let context = I18nContext::try_new_with_preferred_locales(localizer, preferred_locales)?;
     provide_context(context.clone());
     Ok(context)
 }
@@ -329,9 +360,10 @@ mod tests {
     use leptos::prelude::{Get, Owner};
 
     use super::{
-        I18nDocument, I18nMessageKey, NativeLocalizer, RichTextMessage, RichTextPart,
-        RichTextRenderNode, provide_i18n, provide_i18n_with_locale, render_rich_text, text_or_key,
-        try_text, try_use_i18n, use_i18n,
+        I18nContext, I18nDocument, I18nMessageKey, NativeLocalizer, RichTextMessage, RichTextPart,
+        RichTextRenderNode, provide_i18n, provide_i18n_with_locale,
+        provide_i18n_with_preferred_locales, render_rich_text, text_or_key, try_text, try_use_i18n,
+        use_i18n,
     };
 
     #[derive(Clone, Copy)]
@@ -393,6 +425,39 @@ mod tests {
             let selected = context.set_locale("en-US").expect("selected");
             assert_eq!(selected, "en-US");
             assert_eq!(context.locale(), "en-US");
+            assert_eq!(localizer.locale(), "en");
+        });
+    }
+
+    #[test]
+    fn default_context_uses_default_locale_not_native_active_locale() {
+        Owner::new().with(|| {
+            let localizer = test_localizer();
+            localizer.set_locale("fr-CA").expect("native locale");
+            let context = I18nContext::new(localizer);
+
+            assert_eq!(localizer.locale(), "fr-CA");
+            assert_eq!(localizer.default_locale(), "en");
+            assert_eq!(context.locale(), "en");
+        });
+    }
+
+    #[test]
+    fn preferred_locale_constructors_negotiate_without_mutating_native_locale() {
+        Owner::new().with(|| {
+            let localizer = test_localizer();
+            let context =
+                I18nContext::try_new_with_preferred_locales(localizer, ["fr-CA", "en-GB"])
+                    .expect("context");
+
+            assert_eq!(context.locale(), "fr-CA");
+            assert_eq!(localizer.locale(), "en");
+
+            let provided =
+                provide_i18n_with_preferred_locales(localizer, ["es-MX"]).expect("provided");
+
+            assert_eq!(provided.locale(), "es-MX");
+            assert_eq!(use_i18n().locale(), "es-MX");
             assert_eq!(localizer.locale(), "en");
         });
     }
