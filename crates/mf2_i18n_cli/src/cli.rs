@@ -224,7 +224,7 @@ fn usage() -> String {
         ""
     };
     format!(
-        "usage: mf2_i18n_cli init [--preset <name>] [--source-layout <name>] [--target <name>] [--config <path>] [--json]\n       mf2_i18n_cli detect [--cwd <path>] [--json]\n       mf2_i18n_cli build --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli check --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli scaffold missing --source <name> --locale <locale> [--config <path>] [--json]\n       mf2_i18n_cli doctor [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check]{dto_flag} [--json]\n       mf2_i18n_cli build-native --release-id <id> --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]"
+        "usage: mf2_i18n_cli init [--preset <name>] [--source-layout <name>] [--target <name>] [--config <path>] [--json]\n       mf2_i18n_cli detect [--cwd <path>] [--json]\n       mf2_i18n_cli build --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli check --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli scaffold missing --source <name> --locale <locale> [--config <path>] [--json]\n       mf2_i18n_cli doctor [--config <path>] [--json]\n       mf2_i18n_cli build-web --target <name> [--out <dir>] [--config <path>] [--check]{dto_flag} [--json]\n       mf2_i18n_cli build-native --target <name> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli extract --project <id> --root <path> [--root <path>...] --generated-at <rfc3339> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli validate --catalog <path> --id-map-hash <path> [--config <path>] [--json]\n       mf2_i18n_cli sign --manifest <path> --key <path> --key-id <id> [--out <path>] [--json]\n       mf2_i18n_cli pseudo --locale <tag> --target <tag> [--out <dir>] [--config <path>] [--json]\n       mf2_i18n_cli coverage --catalog <path> --id-map-hash <path> [--out <path>] [--config <path>] [--json]\n       mf2_i18n_cli export-web-json [--mode plain] [--out <dir>] [--config <path>] [--json]"
     )
 }
 
@@ -254,28 +254,24 @@ fn parse_validate_options(args: Vec<String>) -> Result<ValidateOptions, CliAppEr
 }
 
 fn parse_build_options(args: Vec<String>) -> Result<BuildOptions, CliAppError> {
-    let mut release_id = None;
-    let mut generated_at = None;
-    let mut out_dir = PathBuf::from("i18n-build");
+    let mut target_name = None;
+    let mut out_dir = None;
     let mut config_path = PathBuf::from("mf2_i18n.toml");
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--release-id" => release_id = Some(next_value("--release-id", &mut iter)?),
-            "--generated-at" => generated_at = Some(next_value("--generated-at", &mut iter)?),
-            "--out" => out_dir = PathBuf::from(next_value("--out", &mut iter)?),
+            "--target" => target_name = Some(next_value("--target", &mut iter)?),
+            "--out" => out_dir = Some(PathBuf::from(next_value("--out", &mut iter)?)),
             "--config" => config_path = PathBuf::from(next_value("--config", &mut iter)?),
             "--help" | "-h" => return Err(CliAppError::Usage(usage())),
             _ => return Err(CliAppError::Usage(usage())),
         }
     }
-    let release_id = release_id.ok_or_else(|| CliAppError::Usage(usage()))?;
-    let generated_at = generated_at.ok_or_else(|| CliAppError::Usage(usage()))?;
+    let target_name = target_name.ok_or_else(|| CliAppError::Usage(usage()))?;
     Ok(BuildOptions {
         config_path,
+        target_name,
         out_dir,
-        release_id,
-        generated_at,
     })
 }
 
@@ -539,13 +535,14 @@ mod tests {
     #[test]
     fn parses_build_options() {
         let args = vec![
-            "--release-id".to_string(),
-            "r1".to_string(),
-            "--generated-at".to_string(),
-            "2026-02-01T00:00:00Z".to_string(),
+            "--target".to_string(),
+            "app".to_string(),
+            "--out".to_string(),
+            "generated/native".to_string(),
         ];
         let options = parse_build_options(args).expect("options");
-        assert_eq!(options.release_id, "r1");
+        assert_eq!(options.target_name, "app");
+        assert!(options.out_dir.expect("out").ends_with("generated/native"));
     }
 
     #[test]

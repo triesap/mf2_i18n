@@ -1,12 +1,17 @@
 use std::path::PathBuf;
 
 use mf2_i18n_build::{
-    NativeModuleBuildError, ProjectRuntimeBuildOptions, build_project_runtime_artifacts,
+    NativeModuleBuildError, NativeModuleBuildOptions, ProjectError, ProjectLayout,
+    build_native_module,
 };
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum BuildCommandError {
+    #[error(transparent)]
+    Project(#[from] ProjectError),
+    #[error("missing native target {0}")]
+    MissingTarget(String),
     #[error(transparent)]
     Build(#[from] NativeModuleBuildError),
 }
@@ -14,18 +19,41 @@ pub enum BuildCommandError {
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
     pub config_path: PathBuf,
-    pub out_dir: PathBuf,
-    pub release_id: String,
-    pub generated_at: String,
+    pub target_name: String,
+    pub out_dir: Option<PathBuf>,
 }
 
 pub fn run_build(options: &BuildOptions) -> Result<(), BuildCommandError> {
-    build_project_runtime_artifacts(&ProjectRuntimeBuildOptions::new(
-        &options.config_path,
-        &options.out_dir,
-        options.release_id.as_str(),
-        options.generated_at.as_str(),
-    ))?;
+    let project = ProjectLayout::load_or_default(&options.config_path)?;
+    let target = project
+        .config()
+        .native
+        .target(&options.target_name)
+        .ok_or_else(|| BuildCommandError::MissingTarget(options.target_name.clone()))?;
+    let out_dir = options
+        .out_dir
+        .clone()
+        .unwrap_or_else(|| target.resolve_out_dir(project.config_path()));
+    let mut build_options =
+        NativeModuleBuildOptions::new(&options.config_path, out_dir, &target.module_name);
+
+    if let Some(module_macro_path) = target.module_macro_path() {
+        build_options = build_options.with_module_macro_path(module_macro_path);
+    }
+
+    if target.release_id.is_some() || target.generated_at.is_some() {
+        let release_id = target
+            .release_id
+            .clone()
+            .unwrap_or_else(|| build_options.release_id().to_string());
+        let generated_at = target
+            .generated_at
+            .clone()
+            .unwrap_or_else(|| build_options.generated_at().to_string());
+        build_options = build_options.with_release_metadata(release_id, generated_at);
+    }
+
+    build_native_module(&build_options)?;
     Ok(())
 }
 
@@ -48,7 +76,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_manifest_and_pack() {
+    fn builds_generated_native_module() {
         let dir = temp_dir();
         let locales_dir = dir.join("locales").join("en");
         fs::create_dir_all(&locales_dir).expect("locale");
@@ -63,25 +91,26 @@ mod tests {
         fs::write(
             &config_path,
             "version = 1
-default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[native.targets]]\nname = \"app\"\nout_dir = \"generated/native\"\nmodule_name = \"app_i18n\"\nrelease_id = \"r1\"\ngenerated_at = \"2026-02-01T00:00:00Z\"\n",
         )
         .expect("config");
 
         let out_dir = dir.join("out");
         run_build(&BuildOptions {
             config_path,
-            out_dir: out_dir.clone(),
-            release_id: "r1".to_string(),
-            generated_at: "2026-02-01T00:00:00Z".to_string(),
+            target_name: "app".to_string(),
+            out_dir: Some(out_dir.clone()),
         })
         .expect("build");
 
-        assert!(out_dir.join("manifest.json").exists());
-        assert!(out_dir.join("id-map.json").exists());
-        assert!(out_dir.join("packs/en.mf2pack").exists());
-        assert!(out_dir.join("platform-bundle.json").exists());
+        let artifact_dir = out_dir.join("app_i18n");
+        assert!(artifact_dir.join("generated_module.rs").exists());
+        assert!(artifact_dir.join("manifest.json").exists());
+        assert!(artifact_dir.join("id-map.json").exists());
+        assert!(artifact_dir.join("packs/en.mf2pack").exists());
+        assert!(artifact_dir.join("platform-bundle.json").exists());
         assert!(
-            fs::read_to_string(out_dir.join("id-map.json"))
+            fs::read_to_string(artifact_dir.join("id-map.json"))
                 .expect("id map")
                 .contains("\"common.home.title\"")
         );
@@ -105,15 +134,14 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         fs::write(
             &config_path,
             "version = 1
-default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"\n\n[[native.targets]]\nname = \"app\"\nout_dir = \"generated/native\"\nmodule_name = \"app_i18n\"\n",
         )
         .expect("config");
 
         let err = run_build(&BuildOptions {
             config_path,
-            out_dir: dir.join("out"),
-            release_id: "r1".to_string(),
-            generated_at: "2026-02-01T00:00:00Z".to_string(),
+            target_name: "app".to_string(),
+            out_dir: Some(dir.join("out")),
         })
         .expect_err("build should fail");
 
@@ -122,6 +150,38 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
             BuildCommandError::Build(NativeModuleBuildError::Compile { key, .. })
                 if key == "common.home.title"
         ));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_rejects_missing_native_target() {
+        let dir = temp_dir();
+        let locales_dir = dir.join("locales").join("en");
+        fs::create_dir_all(&locales_dir).expect("locale");
+        fs::write(
+            locales_dir.join("common.json"),
+            r#"{"home":{"title":"Hi"}}"#,
+        )
+        .expect("write");
+        fs::write(dir.join("id_salt.txt"), "salt").expect("salt");
+
+        let config_path = dir.join("mf2_i18n.toml");
+        fs::write(
+            &config_path,
+            "version = 1
+default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_salt.txt\"",
+        )
+        .expect("config");
+
+        let err = run_build(&BuildOptions {
+            config_path,
+            target_name: "missing".to_string(),
+            out_dir: None,
+        })
+        .expect_err("target should fail");
+
+        assert!(matches!(err, BuildCommandError::MissingTarget(target) if target == "missing"));
 
         fs::remove_dir_all(&dir).ok();
     }
