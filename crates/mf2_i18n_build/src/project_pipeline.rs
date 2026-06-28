@@ -865,11 +865,41 @@ fn render_generated_leptos_module(
     let document_title_key = document_title_variant
         .map(|variant| format!("Some(MessageKey::{variant})"))
         .unwrap_or_else(|| "None".to_string());
+    let document_sync_source =
+        render_generated_leptos_document_sync(document_title_variant, leptos_target.sync_html_lang);
     let helpers_source = render_generated_leptos_helpers(generated_message_keys, message_metadata);
     format!(
         "include!({native_module_path:?});\n\npub const LEPTOS_MODULE_NAME: &str = {:?};\npub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = {document_title_key};\npub const LEPTOS_SYNC_HTML_LANG: bool = {};\n\npub fn leptos_document_title_key() -> Option<MessageKey> {{\n    LEPTOS_DOCUMENT_TITLE_KEY\n}}\n\npub fn leptos_sync_html_lang() -> bool {{\n    LEPTOS_SYNC_HTML_LANG\n}}\n\npub fn try_text(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> mf2_i18n::NativeResult<String> {{\n    context.try_text(key)\n}}\n\npub fn text(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> String {{\n    context.text(key)\n}}\n\npub fn text_or_key(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> String {{\n    context.text_or_key(key)\n}}\n\npub fn try_text_with_args(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> mf2_i18n::NativeResult<String> {{\n    context.try_text_with_args(key, args)\n}}\n\npub fn text_with_args(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    context.text_with_args(key, args)\n}}\n\npub fn text_with_args_or_key(context: &mf2_i18n::leptos::I18nContext, key: MessageKey, args: &mf2_i18n::Args) -> String {{\n    context.text_with_args_or_key(key, args)\n}}\n\npub fn try_text_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> mf2_i18n::NativeResult<String> + Clone + 'static {{\n    context.try_text_signal(key)\n}}\n\npub fn text_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> String + Clone + 'static {{\n    context.text_signal(key)\n}}\n\npub fn text_or_key_signal(context: &mf2_i18n::leptos::I18nContext, key: MessageKey) -> impl Fn() -> String + Clone + 'static {{\n    context.text_or_key_signal(key)\n}}\n",
         leptos_target.module_name, leptos_target.sync_html_lang
-    ) + &helpers_source
+    ) + &document_sync_source
+        + &helpers_source
+}
+
+fn render_generated_leptos_document_sync(
+    document_title_variant: Option<&str>,
+    sync_html_lang: bool,
+) -> String {
+    let title_source = document_title_variant
+        .map(|variant| {
+            format!(
+                "    let title = Some(context.sync_document_title_with(MessageKey::{variant}, document.clone()));"
+            )
+        })
+        .unwrap_or_else(|| "    let title = None;".to_string());
+    let html_lang_source = if sync_html_lang {
+        "    let html_lang = Some(context.sync_html_lang_with(document));"
+    } else {
+        "    let html_lang = None;"
+    };
+    let unused_source = if document_title_variant.is_none() && !sync_html_lang {
+        "    let _ = context;\n    let _ = document;\n"
+    } else {
+        ""
+    };
+
+    format!(
+        "\npub struct LeptosDocumentEffects {{\n    pub title: Option<mf2_i18n::leptos::I18nEffect>,\n    pub html_lang: Option<mf2_i18n::leptos::I18nEffect>,\n}}\n\npub fn sync_leptos_document(context: &mf2_i18n::leptos::I18nContext) -> LeptosDocumentEffects {{\n    sync_leptos_document_with(context, mf2_i18n::leptos::BrowserI18nDocument)\n}}\n\npub fn sync_leptos_document_with<D>(context: &mf2_i18n::leptos::I18nContext, document: D) -> LeptosDocumentEffects\nwhere\n    D: mf2_i18n::leptos::I18nDocument,\n{{\n{unused_source}{title_source}\n{html_lang_source}\n    LeptosDocumentEffects {{ title, html_lang }}\n}}\n"
+    )
 }
 
 fn render_generated_leptos_helpers(
@@ -1541,6 +1571,18 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
             "pub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = Some(MessageKey::HomepageTitle);"
         ));
         assert!(generated_module.contains("pub const LEPTOS_SYNC_HTML_LANG: bool = true;"));
+        assert!(generated_module.contains("pub struct LeptosDocumentEffects"));
+        assert!(
+            generated_module
+                .contains("pub fn sync_leptos_document(context: &mf2_i18n::leptos::I18nContext)")
+        );
+        assert!(generated_module.contains(
+            "let title = Some(context.sync_document_title_with(MessageKey::HomepageTitle, document.clone()));"
+        ));
+        assert!(
+            generated_module
+                .contains("let html_lang = Some(context.sync_html_lang_with(document));")
+        );
         assert!(
             generated_module.contains(
                 "pub fn try_text(context: &mf2_i18n::leptos::I18nContext, key: MessageKey)"
@@ -1589,6 +1631,9 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
                 .contains("pub const LEPTOS_DOCUMENT_TITLE_KEY: Option<MessageKey> = None;")
         );
         assert!(generated_module.contains("pub const LEPTOS_SYNC_HTML_LANG: bool = false;"));
+        assert!(generated_module.contains("let title = None;"));
+        assert!(generated_module.contains("let html_lang = None;"));
+        assert!(!generated_module.contains("context.sync_html_lang_with(document)"));
 
         fs::remove_dir_all(&root).ok();
     }

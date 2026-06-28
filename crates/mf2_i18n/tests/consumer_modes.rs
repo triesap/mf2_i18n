@@ -252,7 +252,7 @@ mod tests {
         leptos_sync_html_lang, localizer, t_homepage_title, t_homepage_welcome,
         text_homepage_title, text_homepage_title_or_key, text_homepage_title_signal,
         text_homepage_welcome, text_homepage_welcome_signal, try_text_homepage_title,
-        try_text_homepage_welcome,
+        try_text_homepage_welcome, sync_leptos_document_with,
     };
 
     #[derive(Clone, Default)]
@@ -324,9 +324,12 @@ mod tests {
 
             context.update_document_title_with(MessageKey::HomepageTitle, document.clone());
             context.update_html_lang_with(document.clone());
+            let effects = sync_leptos_document_with(&context, document.clone());
 
             assert_eq!(document.title.read().expect("title").as_slice(), ["Raices"]);
             assert_eq!(document.lang.read().expect("lang").as_slice(), ["es"]);
+            assert!(effects.title.is_some());
+            assert!(effects.html_lang.is_some());
         });
     }
 
