@@ -315,7 +315,8 @@ mod tests {
     use super::{InitCommandError, InitOptions, run_init};
     use crate::command_build_web::{BuildWebOptions, run_build_web};
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -331,6 +332,36 @@ mod tests {
         path.push(format!("mf2_i18n_init_{nanos}_{counter}"));
         fs::create_dir_all(&path).expect("dir");
         path
+    }
+
+    fn facade_crate_path() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates dir")
+            .join("mf2_i18n")
+    }
+
+    fn assert_manifest_tests(name: &str, manifest_path: &Path) {
+        let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()))
+            .arg("test")
+            .arg("--quiet")
+            .arg("--manifest-path")
+            .arg(manifest_path)
+            .arg("--target-dir")
+            .arg(
+                manifest_path
+                    .parent()
+                    .expect("manifest parent")
+                    .join("target"),
+            )
+            .output()
+            .expect("fixture cargo test should run");
+
+        if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            panic!("fixture `{name}` failed cargo test\nstdout:\n{stdout}\nstderr:\n{stderr}");
+        }
     }
 
     #[test]
@@ -427,6 +458,82 @@ mod tests {
         ));
         assert!(!package.contains("mf2:check"));
         assert!(!package.contains("build-web"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn initialized_leptos_project_builds_from_cargo_out_dir() {
+        let dir = temp_dir();
+        fs::write(
+            dir.join("Cargo.toml"),
+            format!(
+                r#"[package]
+name = "mf2_i18n_initialized_leptos_fixture"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+mf2_i18n = {{ path = {path:?}, default-features = false, features = ["leptos"] }}
+leptos = {{ version = "0.9.0-alpha", default-features = false }}
+
+[build-dependencies]
+mf2_i18n = {{ path = {path:?}, default-features = false, features = ["build"] }}
+"#,
+                path = facade_crate_path().to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .expect("manifest");
+        fs::create_dir_all(dir.join("src")).expect("src");
+        fs::write(
+            dir.join("src/lib.rs"),
+            r#"include!(concat!(env!("OUT_DIR"), "/app_i18n.rs"));
+
+#[cfg(test)]
+mod tests {
+    use leptos::prelude::Owner;
+
+    use super::{MessageKey, localizer, t_app_title, text_app_title};
+
+    #[test]
+    fn generated_scaffold_formats_starter_text() {
+        assert_eq!(t_app_title(), "TODO");
+        Owner::new().with(|| {
+            let context = mf2_i18n::leptos::provide_i18n(localizer());
+            assert_eq!(text_app_title(&context), "TODO");
+            assert_eq!(context.text(MessageKey::AppTitle), "TODO");
+        });
+    }
+}
+"#,
+        )
+        .expect("source");
+        let config_path = dir.join("mf2_i18n.toml");
+        run_init(&InitOptions {
+            config_path: config_path.clone(),
+            preset: "leptos".to_string(),
+            source_layout: "locale-namespace".to_string(),
+            target_name: "app".to_string(),
+        })
+        .expect("init");
+
+        let config = fs::read_to_string(&config_path).expect("config");
+        assert!(config.contains("[[native.targets]]"));
+        assert!(config.contains("[[leptos.targets]]"));
+        assert!(config.contains("out_dir = \"src/generated/i18n\""));
+        let build_script = fs::read_to_string(dir.join("build.rs")).expect("build script");
+        assert!(build_script.contains("std::env::var(\"OUT_DIR\")"));
+        assert!(build_script.contains("mf2_i18n::build_leptos_target"));
+        assert!(build_script.contains(".with_out_dir(&out_dir)"));
+        assert!(dir.join("locales/en/app.mf2").exists());
+        assert!(dir.join("src/generated/i18n/.gitignore").exists());
+
+        assert_manifest_tests("initialized_leptos", &dir.join("Cargo.toml"));
+
+        assert!(!dir.join("src/generated/i18n/app_i18n.rs").exists());
+        assert!(!dir.join("target/mf2/native/generated_module.rs").exists());
 
         fs::remove_dir_all(&dir).ok();
     }
