@@ -7,6 +7,7 @@ Semantic Versioning.
 
 ## [Unreleased]
 
-- add a manual crates.io publishing workflow and publish script
+- prepare crates.io package metadata for the initial managed release
+- align maintainer publishing notes with the local release authority
 - simplify the public docs layout and terminology for OSS publishing
 - change the default project salt path to config-relative `id_salt.txt`

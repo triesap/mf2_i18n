@@ -1,7 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/*"
+    "crates/mf2_i18n",
+    "crates/mf2_i18n_build",
+    "crates/mf2_i18n_cli",
+    "crates/mf2_i18n_core",
+    "crates/mf2_i18n_embedded",
+    "crates/mf2_i18n_leptos",
+    "crates/mf2_i18n_native",
+    "crates/mf2_i18n_runtime",
+    "crates/mf2_i18n_server",
+    "crates/mf2_i18n_std",
+    "crates/mf2_i18n_wasm",
 ]
 
 [workspace.package]
@@ -26,7 +36,7 @@ serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "1.0"
 toml = "0.8"
-dto_bindgen = { git = "ssh://git@github.com/triesap/dto_bindgen.git", rev = "7b4f0a5b30bc0811fa0901446f178df558c03924" }
+dto_bindgen = "0.1.0"
 mf2_i18n_build = { version = "0.1.0", path = "crates/mf2_i18n_build" }
 mf2_i18n_leptos = { version = "0.1.0", path = "crates/mf2_i18n_leptos" }
 mf2_i18n_core = { version = "0.1.0", path = "crates/mf2_i18n_core" }

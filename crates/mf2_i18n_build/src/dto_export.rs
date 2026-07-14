@@ -91,7 +91,7 @@ fn dto_config() -> &'static str {
 out_dir = "dto"
 
 [numeric]
-large_int_policy = "json_number_unsafe"
+large_int_policy = "json_number"
 
 [typescript]
 enabled = true
@@ -141,42 +141,40 @@ mod tests {
     use super::web_dto_artifact_files;
 
     #[test]
-    fn web_dto_artifacts_export_one_manifest_family() {
-        let paths = artifact_paths();
+    fn web_dto_artifacts_export_manifest_family_in_typescript_bundle() {
+        let files = artifact_files();
+        let paths = files
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>();
 
-        assert!(paths.iter().any(|path| path == "dto/ts/manifest.ts"));
+        assert!(paths.contains(&"dto/ts/index.ts"));
+        assert!(paths.contains(&"dto/ts/types.ts"));
+        assert!(!paths.iter().any(|path| path.ends_with("/manifest.ts")));
         assert!(
-            paths
+            !paths
                 .iter()
-                .any(|path| path == "dto/ts/manifest_signing.ts")
+                .any(|path| path.ends_with("/manifest_signing.ts"))
         );
-        assert!(paths.iter().any(|path| path == "dto/ts/pack_entry.ts"));
-        assert_eq!(
-            paths
-                .iter()
-                .filter(|path| path.ends_with("/manifest.ts"))
-                .count(),
-            1
-        );
-        assert_eq!(
-            paths
-                .iter()
-                .filter(|path| path.ends_with("/manifest_signing.ts"))
-                .count(),
-            1
-        );
-        assert_eq!(
-            paths
-                .iter()
-                .filter(|path| path.ends_with("/pack_entry.ts"))
-                .count(),
-            1
-        );
+        assert!(!paths.iter().any(|path| path.ends_with("/pack_entry.ts")));
+
+        let types = files
+            .iter()
+            .find(|(path, _)| path == "dto/ts/types.ts")
+            .map(|(_, contents)| contents.as_str())
+            .expect("types bundle");
+        assert!(types.contains("export type Manifest ="));
+        assert!(types.contains("export type ManifestSigning ="));
+        assert!(types.contains("export type PackEntry ="));
     }
 
     #[test]
     fn web_dto_artifacts_do_not_emit_python_package() {
-        let paths = artifact_paths();
+        let files = artifact_files();
+        let paths = files
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>();
 
         assert!(
             paths
@@ -186,11 +184,16 @@ mod tests {
         assert!(!paths.iter().any(|path| path.ends_with("py.typed")));
     }
 
-    fn artifact_paths() -> Vec<String> {
+    fn artifact_files() -> Vec<(String, String)> {
         web_dto_artifact_files()
             .expect("dto artifacts")
-            .iter()
-            .map(|file| file.relative_path().to_string_lossy().into_owned())
+            .into_iter()
+            .map(|file| {
+                (
+                    file.relative_path().to_string_lossy().into_owned(),
+                    String::from_utf8(file.bytes().to_vec()).expect("utf-8 dto artifact"),
+                )
+            })
             .collect()
     }
 }

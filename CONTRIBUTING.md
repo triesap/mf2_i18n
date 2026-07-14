@@ -24,15 +24,12 @@ This repository is a Rust workspace. Typical tasks:
 
 ## Publishing
 
-Publishing is driven by the repo-owned script and GitHub Actions workflow:
+Publishing is maintainer-only, local, and contract-gated.
 
-- local dry run: `./scripts/publish-crates.sh dry-run`
-- local publish: `./scripts/publish-crates.sh publish`
-- CI publish lane: `.github/workflows/publish-crates.yml`
-
-The workflow is manual-only and publishes crates in dependency order. Use the
-`from_crate` input to resume after a partial release or crates.io index lag.
-Actual publish runs require the `CARGO_REGISTRY_TOKEN` repository secret.
+Do not publish with ad hoc `cargo publish` commands. A release candidate must pass
+formatting, tests, package verification, and crates.io registry checks before any
+crate version is published. Hosted publish workflows are not the release
+authority for this project.
 
 ## Pull request checklist
 

@@ -10,6 +10,7 @@ rust-version.workspace = true
 description = "Server-side helpers for Unicode MessageFormat v2 (MF2) runtimes."
 keywords = ["i18n", "messageformat", "localization", "unicode", "mf2"]
 categories = ["internationalization", "text-processing"]
+publish = false
 
 [lib]
 name = "mf2_i18n_server"

@@ -220,8 +220,8 @@ out_dir = "web-generated"
 
         let out_dir = dir.join("web-generated");
         assert!(out_dir.join("dto/dto_bindgen.generated.json").exists());
-        assert!(out_dir.join("dto/ts/catalog.ts").exists());
         assert!(out_dir.join("dto/ts/index.ts").exists());
+        assert!(out_dir.join("dto/ts/types.ts").exists());
         assert!(!out_dir.join("dto/python").exists());
         let index = fs::read_to_string(out_dir.join("index.ts")).expect("index");
         assert!(index.contains("export * from \"./types\";"));
@@ -231,7 +231,7 @@ out_dir = "web-generated"
         assert!(index.contains("RuntimeWebAssets as Mf2RuntimeAssets"));
         let manifest = fs::read_to_string(out_dir.join("mf2-web-manifest.json")).expect("manifest");
         assert!(manifest.contains("index.ts"));
-        assert!(manifest.contains("dto/ts/catalog.ts"));
+        assert!(manifest.contains("dto/ts/types.ts"));
         assert!(!manifest.contains("dto/python"));
 
         run_build_web(&BuildWebOptions {
