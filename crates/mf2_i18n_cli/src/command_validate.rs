@@ -59,25 +59,23 @@ fn validate_locale(
                 1,
                 1,
             ));
-        } else {
-            if let Some(entry) = locale.messages.get(key) {
-                match parse_message(&entry.value) {
-                    Ok(message) => {
-                        for mut diag in validate_message(&message, spec) {
-                            let line = entry.line + diag.line.unwrap_or(1) - 1;
-                            let column = diag.column.unwrap_or(1);
-                            diag.file = Some(entry.file.clone());
-                            diag.line = Some(line);
-                            diag.column = Some(column);
-                            diagnostics.push(diag);
-                        }
+        } else if let Some(entry) = locale.messages.get(key) {
+            match parse_message(&entry.value) {
+                Ok(message) => {
+                    for mut diag in validate_message(&message, spec) {
+                        let line = entry.line + diag.line.unwrap_or(1) - 1;
+                        let column = diag.column.unwrap_or(1);
+                        diag.file = Some(entry.file.clone());
+                        diag.line = Some(line);
+                        diag.column = Some(column);
+                        diagnostics.push(diag);
                     }
-                    Err(err) => {
-                        diagnostics.push(
-                            Diagnostic::new("MF2E001", format!("parse error: {}", err.message))
-                                .with_span(entry.file.clone(), entry.line, 1),
-                        );
-                    }
+                }
+                Err(err) => {
+                    diagnostics.push(
+                        Diagnostic::new("MF2E001", format!("parse error: {}", err.message))
+                            .with_span(entry.file.clone(), entry.line, 1),
+                    );
                 }
             }
         }

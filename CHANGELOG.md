@@ -7,6 +7,7 @@ Semantic Versioning.
 
 ## [Unreleased]
 
+- add pure localized document projection for native SSR and browser adapters
 - define render-neutral Leptos CSR, hydration, and SSR compatibility
 - prepare crates.io package metadata for the initial managed release
 - align maintainer publishing notes with the local release authority

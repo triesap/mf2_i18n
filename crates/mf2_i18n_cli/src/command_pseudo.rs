@@ -84,9 +84,7 @@ fn pseudolocalize_message(input: &str) -> String {
                 output.push(ch);
             }
             '}' => {
-                if depth > 0 {
-                    depth -= 1;
-                }
+                depth = depth.saturating_sub(1);
                 output.push(ch);
             }
             _ => {
@@ -107,10 +105,7 @@ fn pseudo_char(ch: char) -> String {
         return ch.to_string();
     }
     let lower = ch.to_ascii_lowercase();
-    let doubled = match lower {
-        'a' | 'e' | 'i' | 'o' | 'u' => true,
-        _ => false,
-    };
+    let doubled = matches!(lower, 'a' | 'e' | 'i' | 'o' | 'u');
     if doubled {
         let mut out = String::new();
         out.push(ch);

@@ -121,12 +121,11 @@ impl<'a> Scanner<'a> {
         if self.peek() != Some(b't') || self.peek_next() != Some(b'!') {
             return false;
         }
-        if self.index > 0 {
-            if let Some(prev) = self.input.get(self.index - 1).copied() {
-                if is_ident_continue(prev) {
-                    return false;
-                }
-            }
+        if self.index > 0
+            && let Some(prev) = self.input.get(self.index - 1).copied()
+            && is_ident_continue(prev)
+        {
+            return false;
         }
         true
     }

@@ -3,6 +3,21 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const LEPTOS_ALPHA_COMPATIBILITY_DEPENDENCIES: &str = r#"
+hydration_context = "=0.3.1"
+leptos = { version = "=0.9.0-alpha", default-features = false }
+leptos_config = "=0.9.0-alpha"
+leptos_dom = "=0.9.0-alpha"
+leptos_hot_reload = "=0.9.0-alpha"
+leptos_macro = "=0.9.0-alpha"
+leptos_server = "=0.9.0-alpha"
+reactive_graph = "=0.3.0-alpha"
+reactive_stores = "=0.5.0-alpha"
+server_fn = "=0.9.0-alpha"
+tachys = "=0.3.0-alpha"
+throw_error = "=0.3.1"
+"#;
+
 fn facade_crate_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
 }
@@ -65,6 +80,11 @@ fn assert_fixture_builds(name: &str) {
 fn assert_inline_fixture_builds(name: &str, features: &str, source: &str) {
     let fixture_dir = unique_target_dir(&format!("{name}_fixture"));
     let src_dir = fixture_dir.join("src");
+    let compatibility_dependencies = if features.contains("leptos") {
+        LEPTOS_ALPHA_COMPATIBILITY_DEPENDENCIES
+    } else {
+        ""
+    };
     fs::create_dir_all(&src_dir).expect("src");
     fs::write(
         fixture_dir.join("Cargo.toml"),
@@ -78,8 +98,9 @@ edition = "2024"
 
 [dependencies]
 mf2_i18n = {{ path = {path:?}, default-features = false, features = {features} }}
+{compatibility_dependencies}
 "#,
-            path = facade_crate_path().to_string_lossy().replace('\\', "/")
+            path = facade_crate_path().to_string_lossy().replace('\\', "/"),
         ),
     )
     .expect("manifest");
@@ -205,12 +226,13 @@ edition = "2024"
 
 [dependencies]
 mf2_i18n = {{ path = {path:?}, default-features = false, features = ["leptos"] }}
-leptos = {{ version = "0.9.0-alpha", default-features = false }}
+{compatibility_dependencies}
 
 [build-dependencies]
 mf2_i18n = {{ path = {path:?}, default-features = false, features = ["build"] }}
 "#,
-            path = facade_crate_path().to_string_lossy().replace('\\', "/")
+            path = facade_crate_path().to_string_lossy().replace('\\', "/"),
+            compatibility_dependencies = LEPTOS_ALPHA_COMPATIBILITY_DEPENDENCIES,
         ),
     );
     write_file(&fixture_dir.join("id_salt.txt"), "homepage-leptos-fixture");
@@ -280,10 +302,11 @@ mod tests {
 
     use super::{
         HomepageCtaRichArgs, HomepageWelcomeArgs, LEPTOS_MODULE_NAME, MessageKey,
-        leptos_document_title_key, leptos_sync_html_lang, localizer, rich_homepage_cta,
-        t_homepage_title, t_homepage_welcome, text_homepage_title, text_homepage_title_or_key,
+        leptos_document_projection_or_key, leptos_document_title_key, leptos_sync_html_lang,
+        localizer, rich_homepage_cta, sync_leptos_document_with, t_homepage_title,
+        t_homepage_welcome, text_homepage_title, text_homepage_title_or_key,
         text_homepage_title_signal, text_homepage_welcome, text_homepage_welcome_signal,
-        try_text_homepage_title, try_text_homepage_welcome, sync_leptos_document_with,
+        try_leptos_document_projection, try_text_homepage_title, try_text_homepage_welcome,
     };
 
     #[derive(Clone, Default)]
@@ -331,6 +354,14 @@ mod tests {
             assert_eq!(try_text_homepage_title(&context).expect("title"), "Raices");
             assert_eq!(text_homepage_title(&context), "Raices");
             assert_eq!(text_homepage_title_or_key(&context), "Raices");
+            let projection =
+                try_leptos_document_projection(&context).expect("document projection");
+            assert_eq!(projection.title(), Some("Raices"));
+            assert_eq!(projection.html_lang(), Some("es"));
+            assert_eq!(
+                leptos_document_projection_or_key(&context),
+                projection
+            );
             assert_eq!(
                 try_text_homepage_welcome(&context, &args).expect("welcome"),
                 "Hola Nova"

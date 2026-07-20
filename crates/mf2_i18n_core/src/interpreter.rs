@@ -280,7 +280,7 @@ fn select_plural_case(
     match_other(table)
 }
 
-fn get_case_table<'a>(program: &'a BytecodeProgram, table_idx: u32) -> CoreResult<&'a CaseTable> {
+fn get_case_table(program: &BytecodeProgram, table_idx: u32) -> CoreResult<&CaseTable> {
     program
         .case_tables
         .get(table_idx as usize)
@@ -292,10 +292,10 @@ fn match_case(table: &CaseTable, program: &BytecodeProgram, value: &str) -> Core
     for entry in &table.entries {
         match &entry.key {
             CaseKey::String(sidx) => {
-                if let Some(candidate) = program.string_pool.get(*sidx) {
-                    if candidate == value {
-                        return Ok(entry.target as usize);
-                    }
+                if let Some(candidate) = program.string_pool.get(*sidx)
+                    && candidate == value
+                {
+                    return Ok(entry.target as usize);
                 }
             }
             CaseKey::Other => other = Some(entry.target as usize),
@@ -314,10 +314,10 @@ fn match_exact_number(table: &CaseTable, value: f64) -> Option<usize> {
         return None;
     }
     for entry in &table.entries {
-        if let CaseKey::Exact(exact) = entry.key {
-            if exact == candidate {
-                return Some(entry.target as usize);
-            }
+        if let CaseKey::Exact(exact) = entry.key
+            && exact == candidate
+        {
+            return Some(entry.target as usize);
         }
     }
     None
@@ -325,10 +325,10 @@ fn match_exact_number(table: &CaseTable, value: f64) -> Option<usize> {
 
 fn match_plural_category(table: &CaseTable, category: crate::PluralCategory) -> Option<usize> {
     for entry in &table.entries {
-        if let CaseKey::Category(case_category) = entry.key {
-            if case_category == category {
-                return Some(entry.target as usize);
-            }
+        if let CaseKey::Category(case_category) = entry.key
+            && case_category == category
+        {
+            return Some(entry.target as usize);
         }
     }
     None

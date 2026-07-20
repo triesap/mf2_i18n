@@ -39,6 +39,11 @@ that same projection to the live document. Consumer fixtures qualify native
 SSR rendering and the corresponding browser hydration build in addition to
 ordinary Trunk CSR use.
 
+The workspace pins the exact Leptos prerelease and commits its root
+`Cargo.lock`. This is required because the upstream prerelease crates use
+compatible ranges for sibling crates that can otherwise admit an incompatible
+beta graph. Applications must also commit and use their own qualified lockfile.
+
 ## Status
 
 This crate is pre-1.0. Public APIs are intended to be usable, but may still change

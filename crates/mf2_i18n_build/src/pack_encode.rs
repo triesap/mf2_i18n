@@ -34,12 +34,13 @@ pub fn encode_pack(input: &PackBuildInput) -> Vec<u8> {
     let meta_section = encode_message_meta(&remapped_messages, &string_pool);
     let (blob_section, index_section) = encode_bytecode_blob(&remapped_messages, input.pack_kind);
 
-    let mut sections = Vec::new();
-    sections.push((1u8, string_section));
-    sections.push((2u8, index_section));
-    sections.push((3u8, blob_section));
-    sections.push((4u8, case_section));
-    sections.push((5u8, meta_section));
+    let sections = vec![
+        (1u8, string_section),
+        (2u8, index_section),
+        (3u8, blob_section),
+        (4u8, case_section),
+        (5u8, meta_section),
+    ];
 
     build_pack_bytes(
         input.pack_kind,
@@ -397,7 +398,6 @@ impl StringInterner {
             return *idx;
         }
         let idx = self.pool.push(value.to_string());
-        let idx = idx as u32;
         self.map.insert(value.to_string(), idx);
         idx
     }

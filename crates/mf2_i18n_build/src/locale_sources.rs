@@ -121,7 +121,7 @@ mod tests {
         fs::create_dir_all(&locale_dir).expect("locale");
         fs::write(locale_dir.join("messages.mf2"), "home.title = Hi").expect("write");
 
-        let locales = load_locales(&[dir.clone()]).expect("load");
+        let locales = load_locales(std::slice::from_ref(&dir)).expect("load");
         assert_eq!(locales.len(), 1);
         assert!(locales[0].messages.contains_key("home.title"));
 

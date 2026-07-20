@@ -896,7 +896,7 @@ fn render_generated_leptos_document_sync(
     };
 
     format!(
-        "\npub struct LeptosDocumentEffects {{\n    pub title: Option<mf2_i18n::leptos::I18nEffect>,\n    pub html_lang: Option<mf2_i18n::leptos::I18nEffect>,\n}}\n\npub fn sync_leptos_document(context: &mf2_i18n::leptos::I18nContext) -> LeptosDocumentEffects {{\n    sync_leptos_document_with(context, mf2_i18n::leptos::BrowserI18nDocument)\n}}\n\npub fn sync_leptos_document_with<D>(context: &mf2_i18n::leptos::I18nContext, document: D) -> LeptosDocumentEffects\nwhere\n    D: mf2_i18n::leptos::I18nDocument,\n{{\n{unused_source}{title_source}\n{html_lang_source}\n    LeptosDocumentEffects {{ title, html_lang }}\n}}\n"
+        "\npub fn try_leptos_document_projection(context: &mf2_i18n::leptos::I18nContext) -> mf2_i18n::NativeResult<mf2_i18n::leptos::I18nDocumentProjection> {{\n    context.try_document_projection(LEPTOS_DOCUMENT_TITLE_KEY, LEPTOS_SYNC_HTML_LANG)\n}}\n\npub fn leptos_document_projection_or_key(context: &mf2_i18n::leptos::I18nContext) -> mf2_i18n::leptos::I18nDocumentProjection {{\n    context.document_projection_or_key(LEPTOS_DOCUMENT_TITLE_KEY, LEPTOS_SYNC_HTML_LANG)\n}}\n\npub struct LeptosDocumentEffects {{\n    pub title: Option<mf2_i18n::leptos::I18nEffect>,\n    pub html_lang: Option<mf2_i18n::leptos::I18nEffect>,\n}}\n\n#[cfg(target_arch = \"wasm32\")]\npub fn sync_leptos_document(context: &mf2_i18n::leptos::I18nContext) -> LeptosDocumentEffects {{\n    sync_leptos_document_with(context, mf2_i18n::leptos::BrowserI18nDocument)\n}}\n\npub fn sync_leptos_document_with<D>(context: &mf2_i18n::leptos::I18nContext, document: D) -> LeptosDocumentEffects\nwhere\n    D: mf2_i18n::leptos::I18nDocument,\n{{\n{unused_source}{title_source}\n{html_lang_source}\n    LeptosDocumentEffects {{ title, html_lang }}\n}}\n"
     )
 }
 
@@ -1674,6 +1674,9 @@ default_locale = \"en\"\nsource_dirs = [\"locales\"]\nproject_salt_path = \"id_s
         ));
         assert!(generated_module.contains("pub const LEPTOS_SYNC_HTML_LANG: bool = true;"));
         assert!(generated_module.contains("pub struct LeptosDocumentEffects"));
+        assert!(generated_module.contains("pub fn try_leptos_document_projection("));
+        assert!(generated_module.contains("pub fn leptos_document_projection_or_key("));
+        assert!(generated_module.contains("#[cfg(target_arch = \"wasm32\")]"));
         assert!(
             generated_module
                 .contains("pub fn sync_leptos_document(context: &mf2_i18n::leptos::I18nContext)")

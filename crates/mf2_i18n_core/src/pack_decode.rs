@@ -45,7 +45,7 @@ pub fn decode_sparse_index(input: &[u8]) -> CoreResult<Vec<(MessageId, u32)>> {
     Ok(pairs)
 }
 
-pub fn read_bytecode_at<'a>(blob: &'a [u8], offset: u32) -> CoreResult<&'a [u8]> {
+pub fn read_bytecode_at(blob: &[u8], offset: u32) -> CoreResult<&[u8]> {
     let offset = offset as usize;
     if offset + 4 > blob.len() {
         return Err(CoreError::InvalidInput("bytecode offset out of bounds"));

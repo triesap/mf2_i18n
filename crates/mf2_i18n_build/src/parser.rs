@@ -133,7 +133,7 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        let start = self.peek_span().unwrap_or_else(|| Span {
+        let start = self.peek_span().unwrap_or(Span {
             start: 0,
             end: 0,
             line: 1,

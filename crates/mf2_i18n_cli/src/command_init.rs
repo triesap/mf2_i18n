@@ -321,6 +321,20 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    const LEPTOS_ALPHA_COMPATIBILITY_DEPENDENCIES: &str = r#"
+hydration_context = "=0.3.1"
+leptos = { version = "=0.9.0-alpha", default-features = false }
+leptos_config = "=0.9.0-alpha"
+leptos_dom = "=0.9.0-alpha"
+leptos_hot_reload = "=0.9.0-alpha"
+leptos_macro = "=0.9.0-alpha"
+leptos_server = "=0.9.0-alpha"
+reactive_graph = "=0.3.0-alpha"
+reactive_stores = "=0.5.0-alpha"
+server_fn = "=0.9.0-alpha"
+tachys = "=0.3.0-alpha"
+throw_error = "=0.3.1"
+"#;
 
     fn temp_dir() -> PathBuf {
         let mut path = std::env::temp_dir();
@@ -477,12 +491,13 @@ edition = "2024"
 
 [dependencies]
 mf2_i18n = {{ path = {path:?}, default-features = false, features = ["leptos"] }}
-leptos = {{ version = "0.9.0-alpha", default-features = false }}
+{compatibility_dependencies}
 
 [build-dependencies]
 mf2_i18n = {{ path = {path:?}, default-features = false, features = ["build"] }}
 "#,
-                path = facade_crate_path().to_string_lossy().replace('\\', "/")
+                path = facade_crate_path().to_string_lossy().replace('\\', "/"),
+                compatibility_dependencies = LEPTOS_ALPHA_COMPATIBILITY_DEPENDENCIES,
             ),
         )
         .expect("manifest");

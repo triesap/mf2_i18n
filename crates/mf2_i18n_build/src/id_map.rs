@@ -32,14 +32,14 @@ impl IdMap {
     }
 
     pub fn insert(&mut self, key: String, id: MessageId) -> Result<(), IdMapError> {
-        if let Some(existing) = self.reverse.get(&id) {
-            if existing != &key {
-                return Err(IdMapError::Collision {
-                    id,
-                    existing: existing.clone(),
-                    incoming: key,
-                });
-            }
+        if let Some(existing) = self.reverse.get(&id)
+            && existing != &key
+        {
+            return Err(IdMapError::Collision {
+                id,
+                existing: existing.clone(),
+                incoming: key,
+            });
         }
         self.entries.insert(key.clone(), id);
         self.reverse.insert(id, key);

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -35,7 +35,7 @@ pub fn run_detect(options: &DetectOptions) -> DetectReport {
     }
 }
 
-fn detect_package_presets(cwd: &PathBuf, detected_presets: &mut Vec<String>) {
+fn detect_package_presets(cwd: &Path, detected_presets: &mut Vec<String>) {
     let package_path = cwd.join("package.json");
     let Ok(contents) = std::fs::read_to_string(package_path) else {
         return;
@@ -50,16 +50,16 @@ fn detect_package_presets(cwd: &PathBuf, detected_presets: &mut Vec<String>) {
         .flat_map(|object| object.keys().map(String::as_str))
         .collect::<Vec<_>>();
 
-    if dependencies.iter().any(|name| *name == "@docusaurus/core") {
+    if dependencies.contains(&"@docusaurus/core") {
         detected_presets.push("docusaurus".to_string());
     }
-    if dependencies.iter().any(|name| *name == "vite") {
+    if dependencies.contains(&"vite") {
         detected_presets.push("vite".to_string());
     }
-    if dependencies.iter().any(|name| *name == "react") {
+    if dependencies.contains(&"react") {
         detected_presets.push("react".to_string());
     }
-    if dependencies.iter().any(|name| *name == "svelte") {
+    if dependencies.contains(&"svelte") {
         detected_presets.push("svelte".to_string());
     }
     if detected_presets.is_empty() {

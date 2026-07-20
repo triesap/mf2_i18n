@@ -4,6 +4,7 @@
 
 # Cargo
 Cargo.lock
+!/Cargo.lock
 
 # Rust tooling
 **/*.rs.bk

@@ -15,28 +15,47 @@ pub trait I18nDocument: Clone + 'static {
 #[derive(Clone, Copy, Default)]
 pub struct BrowserI18nDocument;
 
+#[cfg(target_arch = "wasm32")]
 impl I18nDocument for BrowserI18nDocument {
     fn set_title(&self, title: &str) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            leptos::prelude::document().set_title(title);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = title;
-        }
+        leptos::prelude::document().set_title(title);
     }
 
     fn set_html_lang(&self, lang: &str) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            if let Some(element) = leptos::prelude::document().document_element() {
-                let _ = element.set_attribute("lang", lang);
-            }
+        if let Some(element) = leptos::prelude::document().document_element() {
+            let _ = element.set_attribute("lang", lang);
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = lang;
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct I18nDocumentProjection {
+    title: Option<String>,
+    html_lang: Option<String>,
+}
+
+impl I18nDocumentProjection {
+    pub fn new(title: Option<String>, html_lang: Option<String>) -> Self {
+        Self { title, html_lang }
+    }
+
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    pub fn html_lang(&self) -> Option<&str> {
+        self.html_lang.as_deref()
+    }
+
+    pub fn apply_to<D>(&self, document: D)
+    where
+        D: I18nDocument,
+    {
+        if let Some(title) = self.title() {
+            document.set_title(title);
+        }
+        if let Some(lang) = self.html_lang() {
+            document.set_html_lang(lang);
         }
     }
 }
@@ -205,6 +224,33 @@ impl I18nContext {
         move || context.text_or_key(key)
     }
 
+    pub fn try_document_projection<K>(
+        &self,
+        title_key: Option<K>,
+        include_html_lang: bool,
+    ) -> NativeResult<I18nDocumentProjection>
+    where
+        K: I18nMessageKey,
+    {
+        let title = title_key.map(|key| self.try_text(key)).transpose()?;
+        let html_lang = include_html_lang.then(|| self.locale());
+        Ok(I18nDocumentProjection::new(title, html_lang))
+    }
+
+    pub fn document_projection_or_key<K>(
+        &self,
+        title_key: Option<K>,
+        include_html_lang: bool,
+    ) -> I18nDocumentProjection
+    where
+        K: I18nMessageKey,
+    {
+        let title = title_key.map(|key| self.text_or_key(key));
+        let html_lang = include_html_lang.then(|| self.locale());
+        I18nDocumentProjection::new(title, html_lang)
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn update_document_title<K>(&self, key: K)
     where
         K: I18nMessageKey,
@@ -220,6 +266,7 @@ impl I18nContext {
         document.set_title(&self.text_or_key(key));
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn sync_document_title<K>(&self, key: K) -> I18nEffect
     where
         K: I18nMessageKey,
@@ -238,6 +285,7 @@ impl I18nContext {
         })
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn update_html_lang(&self) {
         self.update_html_lang_with(BrowserI18nDocument);
     }
@@ -249,6 +297,7 @@ impl I18nContext {
         document.set_html_lang(&self.locale());
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn sync_html_lang(&self) -> I18nEffect {
         self.sync_html_lang_with(BrowserI18nDocument)
     }
@@ -342,6 +391,7 @@ where
     use_i18n().text_or_key_signal(key)
 }
 
+#[cfg(target_arch = "wasm32")]
 pub fn sync_document_title<K>(key: K) -> I18nEffect
 where
     K: I18nMessageKey,
@@ -349,6 +399,7 @@ where
     use_i18n().sync_document_title(key)
 }
 
+#[cfg(target_arch = "wasm32")]
 pub fn sync_html_lang() -> I18nEffect {
     use_i18n().sync_html_lang()
 }
@@ -377,8 +428,8 @@ mod tests {
     use leptos::prelude::{Get, Owner};
 
     use super::{
-        I18nContext, I18nDocument, I18nMessageKey, NativeLocalizer, RichTextMessage, RichTextPart,
-        RichTextRenderNode, provide_i18n, provide_i18n_with_locale,
+        I18nContext, I18nDocument, I18nDocumentProjection, I18nMessageKey, NativeLocalizer,
+        RichTextMessage, RichTextPart, RichTextRenderNode, provide_i18n, provide_i18n_with_locale,
         provide_i18n_with_preferred_locales, render_rich_text, text_or_key, try_text, try_use_i18n,
         use_i18n,
     };
@@ -507,6 +558,27 @@ mod tests {
                 ["home.title"]
             );
             assert_eq!(document.lang.read().expect("lang").as_slice(), ["fr"]);
+        });
+    }
+
+    #[test]
+    fn pure_document_projection_is_explicit_and_browser_independent() {
+        Owner::new().with(|| {
+            let context = provide_i18n(test_localizer());
+            let projection = context.document_projection_or_key(Some(TestKey::HomeTitle), true);
+
+            assert_eq!(
+                projection,
+                I18nDocumentProjection::new(Some("home.title".to_string()), Some("en".to_string()))
+            );
+
+            let document = RecordingDocument::default();
+            projection.apply_to(document.clone());
+            assert_eq!(
+                document.title.read().expect("title").as_slice(),
+                ["home.title"]
+            );
+            assert_eq!(document.lang.read().expect("lang").as_slice(), ["en"]);
         });
     }
 

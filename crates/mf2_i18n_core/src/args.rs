@@ -18,16 +18,16 @@ pub enum ArgType {
 
 impl ArgType {
     pub fn matches(self, value: &Value) -> bool {
-        match (self, value) {
-            (ArgType::Any, _) => true,
-            (ArgType::Str, Value::Str(_)) => true,
-            (ArgType::Num, Value::Num(_)) => true,
-            (ArgType::Bool, Value::Bool(_)) => true,
-            (ArgType::DateTime, Value::DateTime(_)) => true,
-            (ArgType::Unit, Value::Unit { .. }) => true,
-            (ArgType::Currency, Value::Currency { .. }) => true,
-            _ => false,
-        }
+        matches!(
+            (self, value),
+            (ArgType::Any, _)
+                | (ArgType::Str, Value::Str(_))
+                | (ArgType::Num, Value::Num(_))
+                | (ArgType::Bool, Value::Bool(_))
+                | (ArgType::DateTime, Value::DateTime(_))
+                | (ArgType::Unit, Value::Unit { .. })
+                | (ArgType::Currency, Value::Currency { .. })
+        )
     }
 }
 
