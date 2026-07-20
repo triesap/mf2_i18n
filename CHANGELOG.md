@@ -7,6 +7,7 @@ Semantic Versioning.
 
 ## [Unreleased]
 
+- define render-neutral Leptos CSR, hydration, and SSR compatibility
 - prepare crates.io package metadata for the initial managed release
 - align maintainer publishing notes with the local release authority
 - simplify the public docs layout and terminology for OSS publishing

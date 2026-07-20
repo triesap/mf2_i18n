@@ -26,6 +26,19 @@ Use the root `mf2_i18n` crate for normal integrations. The support crates are
 published so Cargo can resolve the feature graph and so advanced users can depend
 on focused lower-level APIs when needed.
 
+## Leptos render modes
+
+The Leptos integration is a shared-library surface and does not select an
+application delivery mode. Final applications select CSR, hydration, or SSR
+through their Leptos dependency graph.
+
+The compatibility contract covers both pure localized document projection and
+live browser effects. SSR consumers must be able to derive document title and
+HTML language without a browser global; CSR and hydration consumers may apply
+that same projection to the live document. Consumer fixtures qualify native
+SSR rendering and the corresponding browser hydration build in addition to
+ordinary Trunk CSR use.
+
 ## Status
 
 This crate is pre-1.0. Public APIs are intended to be usable, but may still change
