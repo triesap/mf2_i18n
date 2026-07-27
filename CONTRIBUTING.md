@@ -11,10 +11,12 @@ Thanks for your interest in contributing to mf2_i18n.
 
 ## Development setup
 
-This repository is a Rust workspace. Typical tasks:
+This repository contains Rust and pnpm workspaces. Typical tasks:
 
 - `cargo fmt --check`
 - `cargo test --workspace --locked`
+- `pnpm install --frozen-lockfile`
+- `pnpm run test:js`
 
 ## Documentation
 

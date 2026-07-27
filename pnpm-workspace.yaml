@@ -1,0 +1,3 @@
+packages:
+  - "packages/mf2-i18n-cli"
+  - "packages/mf2-i18n-cli/fixtures/plain-site"

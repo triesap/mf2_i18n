@@ -1,0 +1,17 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .: {}
+
+  packages/mf2-i18n-cli: {}
+
+  packages/mf2-i18n-cli/fixtures/plain-site:
+    devDependencies:
+      '@mf2-i18n/cli':
+        specifier: workspace:*
+        version: link:../..

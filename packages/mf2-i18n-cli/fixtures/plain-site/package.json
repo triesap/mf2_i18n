@@ -7,6 +7,6 @@
     "mf2:check": "mf2-i18n check --config mf2_i18n.toml --target plain-site"
   },
   "devDependencies": {
-    "@mf2-i18n/cli": "0.1.0"
+    "@mf2-i18n/cli": "workspace:*"
   }
 }
