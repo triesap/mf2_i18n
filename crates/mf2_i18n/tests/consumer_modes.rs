@@ -14,6 +14,8 @@ leptos_server = "=0.9.0-alpha"
 reactive_graph = "=0.3.0-alpha"
 reactive_stores = "=0.5.0-alpha"
 server_fn = "=0.9.0-alpha"
+server_fn_macro = "=0.9.0-alpha"
+server_fn_macro_default = "=0.9.0-alpha"
 tachys = "=0.3.0-alpha"
 throw_error = "=0.3.1"
 "#;
