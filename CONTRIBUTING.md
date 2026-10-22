@@ -11,6 +11,8 @@ Thanks for your interest in contributing to mf2_i18n.
 
 ## Development setup
 
+Use Rust 1.99.0, the pinned development toolchain and minimum supported version.
+
 This repository contains Rust and pnpm workspaces. Typical tasks:
 
 - `cargo fmt --check`

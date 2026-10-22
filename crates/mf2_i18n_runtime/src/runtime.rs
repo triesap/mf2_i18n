@@ -424,12 +424,12 @@ fn parent_map(manifest: &Manifest) -> RuntimeResult<BTreeMap<String, String>> {
                     )));
                 }
                 let parent_tag = normalize_locale(parent)?;
-                if let Some(existing) = parents.insert(locale_tag, parent_tag.clone()) {
-                    if existing != parent_tag {
-                        return Err(RuntimeError::InvalidManifest(format!(
-                            "micro-locale parent for {locale} conflicts with pack parent"
-                        )));
-                    }
+                if let Some(existing) = parents.insert(locale_tag, parent_tag.clone())
+                    && existing != parent_tag
+                {
+                    return Err(RuntimeError::InvalidManifest(format!(
+                        "micro-locale parent for {locale} conflicts with pack parent"
+                    )));
                 }
             }
             PackKind::Base => {
@@ -493,7 +493,7 @@ fn load_pack_bytes(
             actual: actual_parent,
         });
     }
-    Ok(PackCatalog::decode(&bytes, id_map_hash)?)
+    Ok(PackCatalog::decode(bytes, id_map_hash)?)
 }
 
 struct PackMetadata {
@@ -600,7 +600,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1031,7 +1031,7 @@ mod tests {
         fs::remove_dir_all(&root).ok();
     }
 
-    fn write_runtime_fixture(root: &PathBuf, key: &str, source: &str) -> Runtime {
+    fn write_runtime_fixture(root: &Path, key: &str, source: &str) -> Runtime {
         let parts = runtime_parts_fixture(key, source);
         let (manifest_path, id_map_path) = write_runtime_parts(root, &parts);
 
@@ -1066,7 +1066,7 @@ mod tests {
         RuntimeParts::new(manifest, id_map_json, packs)
     }
 
-    fn write_runtime_parts(root: &PathBuf, parts: &RuntimeParts) -> (PathBuf, PathBuf) {
+    fn write_runtime_parts(root: &Path, parts: &RuntimeParts) -> (PathBuf, PathBuf) {
         let packs_dir = root.join("packs");
         fs::create_dir_all(&packs_dir).expect("packs");
         for (locale, bytes) in &parts.packs {

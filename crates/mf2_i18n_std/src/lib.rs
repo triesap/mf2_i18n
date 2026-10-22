@@ -122,7 +122,7 @@ impl StdFormatBackend {
         }
 
         let raw = value.abs().to_string();
-        if let Some(index) = raw.find(|ch| ch == 'e' || ch == 'E') {
+        if let Some(index) = raw.find(['e', 'E']) {
             let mantissa = localize_decimal_string(&raw[..index], number_locale);
             return Ok(format!("{sign}{mantissa}{}", &raw[index..]));
         }
@@ -251,10 +251,10 @@ fn locale_candidates(locale: &str) -> Result<Vec<String>, StdFormatError> {
 
 fn resolve_plural_rules(candidates: &[String]) -> Result<(PluralRules, String), StdFormatError> {
     for candidate in candidates {
-        if let Ok(identifier) = candidate.parse::<LanguageIdentifier>() {
-            if let Ok(rules) = PluralRules::create(identifier, PluralRuleType::CARDINAL) {
-                return Ok((rules, candidate.clone()));
-            }
+        if let Ok(identifier) = candidate.parse::<LanguageIdentifier>()
+            && let Ok(rules) = PluralRules::create(identifier, PluralRuleType::CARDINAL)
+        {
+            return Ok((rules, candidate.clone()));
         }
     }
 

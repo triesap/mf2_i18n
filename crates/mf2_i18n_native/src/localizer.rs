@@ -289,10 +289,10 @@ impl NativeLocalizer {
 
     fn format_backend(&self, locale: &str) -> NativeResult<Arc<StdFormatBackend>> {
         let cache_key = LanguageTag::parse(locale)?.normalized().to_owned();
-        if let Ok(guard) = self.format_backends.read() {
-            if let Some(backend) = guard.get(&cache_key) {
-                return Ok(Arc::clone(backend));
-            }
+        if let Ok(guard) = self.format_backends.read()
+            && let Some(backend) = guard.get(&cache_key)
+        {
+            return Ok(Arc::clone(backend));
         }
 
         let backend = Arc::new(StdFormatBackend::new(&cache_key)?);
@@ -376,7 +376,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir() -> PathBuf {
         let mut path = std::env::temp_dir();
@@ -384,9 +387,35 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        path.push(format!("mf2_i18n_native_{nanos}"));
-        fs::create_dir_all(&path).expect("dir");
+        let sequence = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let process = std::process::id();
+        path.push(format!("mf2_i18n_native_{process}_{nanos}_{sequence}"));
+        fs::create_dir(&path).expect("unique dir");
         path
+    }
+
+    #[test]
+    fn filesystem_fixture_directories_are_isolated_across_threads() {
+        let barrier = std::sync::Barrier::new(16);
+        let roots = std::thread::scope(|scope| {
+            let workers = (0..16)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        (0..8).map(|_| temp_dir()).collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>();
+            workers
+                .into_iter()
+                .flat_map(|worker| worker.join().expect("fixture worker"))
+                .collect::<Vec<_>>()
+        });
+        let unique = roots.iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), roots.len(), "fixture paths must never alias");
+        for root in roots {
+            fs::remove_dir(root).expect("remove empty fixture directory");
+        }
     }
 
     fn build_pack_bytes(id_map_hash: [u8; 32], locale_tag: &str, source: &str) -> Vec<u8> {

@@ -7,6 +7,8 @@ Semantic Versioning.
 
 ## [Unreleased]
 
+- raise the development toolchain and minimum supported Rust version to 1.99.0
+- isolate concurrent native filesystem fixtures and exercise exported macros from an external consumer
 - add pure localized document projection for native SSR and browser adapters
 - define render-neutral Leptos CSR, hydration, and SSR compatibility
 - prepare crates.io package metadata for the initial managed release
